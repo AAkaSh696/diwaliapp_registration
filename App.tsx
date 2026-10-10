@@ -6,7 +6,11 @@
  */
 
 import { NewAppScreen } from '@react-native/new-app-screen';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
+import { StatusBar, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import ReactNav from "../AwesomeProject/components/routes.jsx"
+import {NavigationContainer} from "@react-navigation/native"
+import store from "./redux/store.js"
+import { Provider } from 'react-redux';
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
@@ -18,7 +22,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent />
+      <Provider store={store}><AppContent /></Provider>
     </SafeAreaProvider>
   );
 }
@@ -27,12 +31,8 @@ function AppContent() {
   const safeAreaInsets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
-      <NewAppScreen
-        templateFileName="App.tsx"
-        safeAreaInsets={safeAreaInsets}
-      />
-    </View>
+
+   <NavigationContainer><ReactNav/></NavigationContainer>
   );
 }
 

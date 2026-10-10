@@ -1,0 +1,649 @@
+import React, { useState } from "react";
+// import {BASE_URL} from "@env"
+
+console.log("BASE_URL:", BASE_URL);
+import {
+    StyleSheet,
+    Text,
+    View,
+    TextInput,
+    TouchableOpacity,
+    SafeAreaView,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    Alert
+} from "react-native";
+ const BASE_URL="http://13.53.235.116:5001";
+export default function Signup({ navigation }) {
+
+    const [email, setEmail] = useState("");
+    const [otp, setOtp] = useState("");
+    const [username, setUsername] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+
+    const [otpSent, setOtpSent] = useState(false);
+    const [otpLoading, setOtpLoading] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    const sendOTP = async () => {
+        if (!email.trim()) {
+            Alert.alert(
+                "Email required",
+                "Please enter your email."
+            );
+            return;
+        }
+
+        setOtpLoading(true);
+
+        try {
+            const url = `${BASE_URL}/users/mailauth`;
+
+        console.log("BASE_URL:", BASE_URL);
+        console.log("URL:", url);
+            const response = await fetch(url
+                ,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        username: email.trim()
+                    })
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                Alert.alert(
+                    "Error",
+                    data.msg || "Unable to send OTP."
+                );
+                return;
+            }
+
+            setOtpSent(true);
+            setOtp("");
+
+            Alert.alert(
+                "OTP Sent",
+                "Please check your email for the OTP."
+            );
+        } catch (error) {
+            console.error(error);
+
+            Alert.alert(
+                "Connection Error",
+                "Unable to connect to the server."
+            );
+        } finally {
+            setOtpLoading(false);
+        }
+    };
+
+    const handleSignup = async () => {
+        if (!otpSent) {
+            Alert.alert(
+                "OTP required",
+                "Please enter your email and request an OTP first."
+            );
+            return;
+        }
+
+        if (!otp.trim()) {
+            Alert.alert(
+                "OTP required",
+                "Please enter the OTP."
+            );
+            return;
+        }
+
+        if (!username.trim()) {
+            Alert.alert(
+                "Username required",
+                "Please enter a username."
+            );
+            return;
+        }
+
+        if (!password) {
+            Alert.alert(
+                "Password required",
+                "Please enter a password."
+            );
+            return;
+        }
+
+        if (!confirmPassword) {
+            Alert.alert(
+                "Password required",
+                "Please confirm your password."
+            );
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            Alert.alert(
+                "Password mismatch",
+                "Passwords do not match."
+            );
+            return;
+        }
+
+        if (password.length < 6) {
+            Alert.alert(
+                "Weak password",
+                "Password must contain at least 6 characters."
+            );
+            return;
+        }
+
+        setLoading(true);
+
+        try {
+            const url1 = `${BASE_URL}/users/signup`;
+            const response = await fetch(
+                url1,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        otp: otp.trim(),
+                        username:email.trim(),
+                        password: password,
+                        type:"user"
+                    })
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                Alert.alert(
+                    "Signup failed",
+                    data.msg || "Unable to create account."
+                );
+                return;
+            }
+
+            Alert.alert(
+                "Account Created",
+                "Your account has been created successfully.",
+                [
+                    {
+                        text: "Registration",
+                        onPress: () => navigation.navigate("Login")
+                    }
+                ]
+            );
+
+            setEmail("");
+            setOtp("");
+            setUsername("");
+            setPassword("");
+            setConfirmPassword("");
+            setOtpSent(false);
+
+        } catch (error) {
+            console.error(error);
+
+            Alert.alert(
+                "Signup failed",
+                "Unable to connect to the server."
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <SafeAreaView style={styles.safeArea}>
+            <KeyboardAvoidingView
+                style={styles.keyboardView}
+                behavior={
+                    Platform.OS === "ios"
+                        ? "padding"
+                        : undefined
+                }
+            >
+                <ScrollView
+                    contentContainerStyle={styles.container}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
+                    {/* HEADER */}
+
+                    <View style={styles.header}>
+                        <View style={styles.logoCircle}>
+                            <Text style={styles.logo}>
+                                🪔
+                            </Text>
+                        </View>
+
+                        <Text style={styles.brand}>
+                            DiwaliHaat
+                        </Text>
+
+                        <Text style={styles.tagline}>
+                            Celebrate. Connect. Belong.
+                        </Text>
+                    </View>
+
+                    {/* CARD */}
+
+                    <View style={styles.card}>
+                        <Text style={styles.title}>
+                            Create your account
+                        </Text>
+
+                        <Text style={styles.subtitle}>
+                            Verify your email to join DiwaliHaat
+                        </Text>
+
+                        {/* EMAIL */}
+
+                        <Text style={styles.label}>
+                            Email Address
+                        </Text>
+
+                        <View style={styles.emailRow}>
+                            <TextInput
+                                style={styles.emailInput}
+                                placeholder="Enter your email"
+                                placeholderTextColor="#A7A7A7"
+                                value={email}
+                                onChangeText={(text) => {
+                                    setEmail(text);
+                                    setOtpSent(false);
+                                    setOtp("");
+                                }}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                editable={!loading}
+                            />
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.otpButton,
+                                    otpLoading &&
+                                        styles.disabledButton
+                                ]}
+                                onPress={sendOTP}
+                                disabled={
+                                    otpLoading || loading
+                                }
+                            >
+                                <Text style={styles.otpButtonText}>
+                                    {otpLoading
+                                        ? "..."
+                                        : otpSent
+                                        ? "Resend"
+                                        : "Send OTP"}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* AFTER OTP SENT */}
+
+                        {otpSent && (
+                            <>
+                                <View style={styles.otpInfo}>
+                                    <Text style={styles.otpInfoText}>
+                                        ✓ OTP sent to your email
+                                    </Text>
+                                </View>
+
+                                {/* OTP */}
+
+                                <Text style={styles.label}>
+                                    OTP
+                                </Text>
+
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Enter 6-digit OTP"
+                                    placeholderTextColor="#A7A7A7"
+                                    value={otp}
+                                    onChangeText={setOtp}
+                                    keyboardType="number-pad"
+                                    maxLength={6}
+                                    editable={!loading}
+                                />
+
+                                {/* USERNAME */}
+
+                                <Text style={styles.label}>
+                                    Username
+                                </Text>
+
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Enter username"
+                                    placeholderTextColor="#A7A7A7"
+                                    value={username}
+                                    onChangeText={setUsername}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    editable={!loading}
+                                />
+
+                                {/* PASSWORD */}
+
+                                <Text style={styles.label}>
+                                    Password
+                                </Text>
+
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Create a password"
+                                    placeholderTextColor="#A7A7A7"
+                                    value={password}
+                                    onChangeText={setPassword}
+                                    secureTextEntry
+                                    editable={!loading}
+                                />
+
+                                {/* CONFIRM PASSWORD */}
+
+                                <Text style={styles.label}>
+                                    Confirm Password
+                                </Text>
+
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Confirm your password"
+                                    placeholderTextColor="#A7A7A7"
+                                    value={confirmPassword}
+                                    onChangeText={
+                                        setConfirmPassword
+                                    }
+                                    secureTextEntry
+                                    editable={!loading}
+                                />
+
+                                {/* SIGNUP */}
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.signupButton,
+                                        loading &&
+                                            styles.disabledButton
+                                    ]}
+                                    onPress={handleSignup}
+                                    disabled={loading}
+                                >
+                                    <Text style={styles.signupText}>
+                                        {loading
+                                            ? "Verifying & Creating..."
+                                            : "Verify OTP & Create Account"}
+                                    </Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+
+                        {/* INITIAL MESSAGE */}
+
+                        {!otpSent && (
+                            <View style={styles.instructionBox}>
+                                <Text
+                                    style={
+                                        styles.instructionText
+                                    }
+                                >
+                                    Enter your email and tap
+                                    {" "}
+                                    <Text
+                                        style={
+                                            styles.instructionBold
+                                        }
+                                    >
+                                        Send OTP
+                                    </Text>
+                                    {" "}
+                                    to continue.
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* LOGIN */}
+
+                        <View style={styles.loginRow}>
+                            <Text style={styles.loginText}>
+                                Already have an account?
+                            </Text>
+
+                            <TouchableOpacity
+                                onPress={() =>
+                                    navigation.navigate("Login")
+                                }
+                            >
+                                <Text style={styles.loginLink}>
+                                    {" "}Login
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    {/* FOOTER */}
+
+                    <Text style={styles.footer}>
+                        Your celebration starts here ✨
+                    </Text>
+                </ScrollView>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
+    );
+}
+
+const styles = StyleSheet.create({
+    safeArea: {
+        flex: 1,
+        backgroundColor: "#FFF8F0"
+    },
+
+    keyboardView: {
+        flex: 1
+    },
+
+    container: {
+        flexGrow: 1,
+        justifyContent: "center",
+        paddingHorizontal: 24,
+        paddingVertical: 30
+    },
+
+    header: {
+        alignItems: "center",
+        marginBottom: 25
+    },
+
+    logoCircle: {
+        width: 76,
+        height: 76,
+        borderRadius: 38,
+        backgroundColor: "#FFF0D9",
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 12
+    },
+
+    logo: {
+        fontSize: 38
+    },
+
+    brand: {
+        fontSize: 32,
+        fontWeight: "800",
+        color: "#B64216"
+    },
+
+    tagline: {
+        marginTop: 5,
+        fontSize: 14,
+        color: "#777"
+    },
+
+    card: {
+        backgroundColor: "#FFFFFF",
+        borderRadius: 24,
+        padding: 24,
+
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 8
+        },
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+
+        elevation: 6
+    },
+
+    title: {
+        fontSize: 25,
+        fontWeight: "700",
+        color: "#292929",
+        marginBottom: 7
+    },
+
+    subtitle: {
+        fontSize: 14,
+        color: "#777",
+        marginBottom: 20
+    },
+
+    label: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#444",
+        marginBottom: 8,
+        marginTop: 12
+    },
+
+    emailRow: {
+        flexDirection: "row",
+        alignItems: "center"
+    },
+
+    emailInput: {
+        flex: 1,
+        height: 52,
+        borderWidth: 1,
+        borderColor: "#E6DCD2",
+        borderRadius: 13,
+        paddingHorizontal: 14,
+        fontSize: 15,
+        color: "#222",
+        backgroundColor: "#FFFCF9"
+    },
+
+    otpButton: {
+        height: 52,
+        paddingHorizontal: 15,
+        marginLeft: 8,
+        borderRadius: 13,
+        backgroundColor: "#B64216",
+        justifyContent: "center",
+        alignItems: "center"
+    },
+
+    otpButtonText: {
+        color: "#FFFFFF",
+        fontWeight: "700",
+        fontSize: 13
+    },
+
+    otpInfo: {
+        marginTop: 12,
+        padding: 11,
+        borderRadius: 10,
+        backgroundColor: "#EAF8EF"
+    },
+
+    otpInfoText: {
+        color: "#218739",
+        fontSize: 13,
+        fontWeight: "600",
+        textAlign: "center"
+    },
+
+    input: {
+        height: 52,
+        borderWidth: 1,
+        borderColor: "#E6DCD2",
+        borderRadius: 13,
+        paddingHorizontal: 16,
+        fontSize: 15,
+        color: "#222",
+        backgroundColor: "#FFFCF9"
+    },
+
+    instructionBox: {
+        marginTop: 20,
+        padding: 14,
+        borderRadius: 12,
+        backgroundColor: "#FFF5E8"
+    },
+
+    instructionText: {
+        textAlign: "center",
+        color: "#777",
+        fontSize: 13,
+        lineHeight: 20
+    },
+
+    instructionBold: {
+        color: "#B64216",
+        fontWeight: "700"
+    },
+
+    signupButton: {
+        height: 54,
+        borderRadius: 14,
+        backgroundColor: "#D3541C",
+        justifyContent: "center",
+        alignItems: "center",
+        marginTop: 25
+    },
+
+    disabledButton: {
+        opacity: 0.6
+    },
+
+    signupText: {
+        color: "#FFFFFF",
+        fontSize: 15,
+        fontWeight: "700"
+    },
+
+    loginRow: {
+        flexDirection: "row",
+        justifyContent: "center",
+        marginTop: 22
+    },
+
+    loginText: {
+        color: "#777",
+        fontSize: 14
+    },
+
+    loginLink: {
+        color: "#B64216",
+        fontSize: 14,
+        fontWeight: "700"
+    },
+
+    footer: {
+        textAlign: "center",
+        color: "#999",
+        fontSize: 13,
+        marginTop: 22
+    }
+});
