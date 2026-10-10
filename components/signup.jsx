@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-// import {BASE_URL} from "@env"
+
+import React, { useState, useEffect, useRef } from "react";
+
 import {
     StyleSheet,
     Text,
@@ -12,9 +13,13 @@ import {
     ScrollView,
     Alert
 } from "react-native";
-const BASE_URL = "http://10.162.135.224:5001";
-export default function Signup({ navigation }) {
 
+const BASE_URL = "http://10.162.135.224:5001";
+
+// Cooldown in seconds
+const OTP_COOLDOWN_SECONDS = 13;
+
+export default function Signup({ navigation }) {
     const [email, setEmail] = useState("");
     const [otp, setOtp] = useState("");
     const [username, setUsername] = useState("");
@@ -24,8 +29,75 @@ export default function Signup({ navigation }) {
     const [otpSent, setOtpSent] = useState(false);
     const [otpLoading, setOtpLoading] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [cooldown, setCooldown] = useState(0);
+
+    // Prevent duplicate requests and track cooldown expiry
+    const inFlightRef = useRef(false);
+    const cooldownEndRef = useRef(0);
+    const timerRef = useRef(null);
+
+    // ==========================================================
+    // CLEAN UP TIMER WHEN SCREEN UNMOUNTS
+    // ==========================================================
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, []);
+
+    // ==========================================================
+    // START COOLDOWN
+    // ==========================================================
+
+    const startCooldown = () => {
+        // Remove any previously running timer
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+
+        // Store the actual expiry time
+        cooldownEndRef.current =
+            Date.now() + OTP_COOLDOWN_SECONDS * 1000;
+
+        // Disable the button immediately
+        setCooldown(OTP_COOLDOWN_SECONDS);
+
+        // Update the countdown using the real clock
+        timerRef.current = setInterval(() => {
+            const remaining = Math.max(
+                0,
+                Math.ceil(
+                    (cooldownEndRef.current - Date.now()) / 1000
+                )
+            );
+
+            setCooldown(remaining);
+
+            if (remaining === 0) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        }, 250);
+    };
+
+    // ==========================================================
+    // SEND OTP
+    // ==========================================================
 
     const sendOTP = async () => {
+        // Synchronous guard: blocks rapid taps and active requests
+        if (
+            inFlightRef.current ||
+            Date.now() < cooldownEndRef.current
+        ) {
+            return;
+        }
+
         if (!email.trim()) {
             Alert.alert(
                 "Email required",
@@ -34,27 +106,36 @@ export default function Signup({ navigation }) {
             return;
         }
 
+        // Lock before making the network request
+        inFlightRef.current = true;
         setOtpLoading(true);
+
+        // Start cooldown immediately
+        startCooldown();
 
         try {
             const url = `${BASE_URL}/users/mailauth`;
 
-        console.log("BASE_URL:", BASE_URL);
-        console.log("URL:", url);
-            const response = await fetch(url
-                ,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        username: email.trim()
-                    })
-                }
-            );
+            console.log("BASE_URL:", BASE_URL);
+            console.log("OTP URL:", url);
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    username: email.trim()
+                })
+            });
 
             const data = await response.json();
+
+            console.log(
+                "OTP RESPONSE:",
+                response.status,
+                data
+            );
 
             if (!response.ok) {
                 Alert.alert(
@@ -72,18 +153,25 @@ export default function Signup({ navigation }) {
                 "Please check your email for the OTP."
             );
         } catch (error) {
-            console.error(error);
+            console.error("OTP ERROR:", error);
 
             Alert.alert(
                 "Connection Error",
                 "Unable to connect to the server."
             );
         } finally {
+            inFlightRef.current = false;
             setOtpLoading(false);
         }
     };
 
+    // ==========================================================
+    // SIGNUP
+    // ==========================================================
+
     const handleSignup = async () => {
+        if (loading) return;
+
         if (!otpSent) {
             Alert.alert(
                 "OTP required",
@@ -143,24 +231,28 @@ export default function Signup({ navigation }) {
         setLoading(true);
 
         try {
-            const url1 = `${BASE_URL}/users/signup`;
-            const response = await fetch(
-                url1,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        otp: otp.trim(),
-                        username:email.trim(),
-                        password: password,
-                        type:"user"
-                    })
-                }
-            );
+            const url = `${BASE_URL}/users/signup`;
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    otp: otp.trim(),
+                    username: email.trim(),
+                    password: password,
+                    type: "user"
+                })
+            });
 
             const data = await response.json();
+
+            console.log(
+                "SIGNUP RESPONSE:",
+                response.status,
+                data
+            );
 
             if (!response.ok) {
                 Alert.alert(
@@ -175,8 +267,9 @@ export default function Signup({ navigation }) {
                 "Your account has been created successfully.",
                 [
                     {
-                        text: "Registration",
-                        onPress: () => navigation.navigate("Login")
+                        text: "Login",
+                        onPress: () =>
+                            navigation.navigate("Login")
                     }
                 ]
             );
@@ -187,9 +280,8 @@ export default function Signup({ navigation }) {
             setPassword("");
             setConfirmPassword("");
             setOtpSent(false);
-
         } catch (error) {
-            console.error(error);
+            console.error("SIGNUP ERROR:", error);
 
             Alert.alert(
                 "Signup failed",
@@ -199,6 +291,13 @@ export default function Signup({ navigation }) {
             setLoading(false);
         }
     };
+
+    // ==========================================================
+    // OTP BUTTON STATE
+    // ==========================================================
+
+    const otpButtonDisabled =
+        otpLoading || loading || cooldown > 0;
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -219,9 +318,7 @@ export default function Signup({ navigation }) {
 
                     <View style={styles.header}>
                         <View style={styles.logoCircle}>
-                            <Text style={styles.logo}>
-                                🪔
-                            </Text>
+                            <Text style={styles.logo}>🪔</Text>
                         </View>
 
                         <Text style={styles.brand}>
@@ -233,7 +330,7 @@ export default function Signup({ navigation }) {
                         </Text>
                     </View>
 
-                    {/* CARD */}
+                    {/* SIGNUP CARD */}
 
                     <View style={styles.card}>
                         <Text style={styles.title}>
@@ -264,31 +361,32 @@ export default function Signup({ navigation }) {
                                 keyboardType="email-address"
                                 autoCapitalize="none"
                                 autoCorrect={false}
-                                editable={!loading}
+                                editable={!loading && !otpLoading}
                             />
 
                             <TouchableOpacity
                                 style={[
                                     styles.otpButton,
-                                    otpLoading &&
+                                    otpButtonDisabled &&
                                         styles.disabledButton
                                 ]}
                                 onPress={sendOTP}
-                                disabled={
-                                    otpLoading || loading
-                                }
+                                disabled={otpButtonDisabled}
+                                activeOpacity={0.8}
                             >
                                 <Text style={styles.otpButtonText}>
                                     {otpLoading
-                                        ? "..."
+                                        ? "Sending..."
+                                        : cooldown > 0
+                                        ? `Wait ${cooldown}s`
                                         : otpSent
-                                        ? "Resend"
+                                        ? "Resend OTP"
                                         : "Send OTP"}
                                 </Text>
                             </TouchableOpacity>
                         </View>
 
-                        {/* AFTER OTP SENT */}
+                        {/* OTP SUCCESS MESSAGE */}
 
                         {otpSent && (
                             <>
@@ -359,14 +457,12 @@ export default function Signup({ navigation }) {
                                     placeholder="Confirm your password"
                                     placeholderTextColor="#A7A7A7"
                                     value={confirmPassword}
-                                    onChangeText={
-                                        setConfirmPassword
-                                    }
+                                    onChangeText={setConfirmPassword}
                                     secureTextEntry
                                     editable={!loading}
                                 />
 
-                                {/* SIGNUP */}
+                                {/* SIGNUP BUTTON */}
 
                                 <TouchableOpacity
                                     style={[
@@ -376,8 +472,9 @@ export default function Signup({ navigation }) {
                                     ]}
                                     onPress={handleSignup}
                                     disabled={loading}
+                                    activeOpacity={0.8}
                                 >
-                                    <Text style={styles.signupText}>
+                                    <Text style={styles.signupButtonText}>
                                         {loading
                                             ? "Verifying & Creating..."
                                             : "Verify OTP & Create Account"}
@@ -386,31 +483,21 @@ export default function Signup({ navigation }) {
                             </>
                         )}
 
-                        {/* INITIAL MESSAGE */}
+                        {/* INSTRUCTIONS */}
 
                         {!otpSent && (
                             <View style={styles.instructionBox}>
-                                <Text
-                                    style={
-                                        styles.instructionText
-                                    }
-                                >
-                                    Enter your email and tap
-                                    {" "}
-                                    <Text
-                                        style={
-                                            styles.instructionBold
-                                        }
-                                    >
+                                <Text style={styles.instructionText}>
+                                    Enter your email and tap{" "}
+                                    <Text style={styles.instructionBold}>
                                         Send OTP
-                                    </Text>
-                                    {" "}
+                                    </Text>{" "}
                                     to continue.
                                 </Text>
                             </View>
                         )}
 
-                        {/* LOGIN */}
+                        {/* LOGIN LINK */}
 
                         <View style={styles.loginRow}>
                             <Text style={styles.loginText}>
@@ -492,7 +579,6 @@ const styles = StyleSheet.create({
         backgroundColor: "#FFFFFF",
         borderRadius: 24,
         padding: 24,
-
         shadowColor: "#000",
         shadowOffset: {
             width: 0,
@@ -500,7 +586,6 @@ const styles = StyleSheet.create({
         },
         shadowOpacity: 0.08,
         shadowRadius: 20,
-
         elevation: 6
     },
 
@@ -532,6 +617,7 @@ const styles = StyleSheet.create({
 
     emailInput: {
         flex: 1,
+        minWidth: 0,
         height: 52,
         borderWidth: 1,
         borderColor: "#E6DCD2",
@@ -543,8 +629,8 @@ const styles = StyleSheet.create({
     },
 
     otpButton: {
-        height: 52,
-        paddingHorizontal: 15,
+        minHeight: 52,
+        paddingHorizontal: 12,
         marginLeft: 8,
         borderRadius: 13,
         backgroundColor: "#B64216",
@@ -555,7 +641,7 @@ const styles = StyleSheet.create({
     otpButtonText: {
         color: "#FFFFFF",
         fontWeight: "700",
-        fontSize: 13
+        fontSize: 12
     },
 
     otpInfo: {
@@ -603,27 +689,30 @@ const styles = StyleSheet.create({
     },
 
     signupButton: {
-        height: 54,
+        minHeight: 54,
         borderRadius: 14,
         backgroundColor: "#D3541C",
         justifyContent: "center",
         alignItems: "center",
+        paddingHorizontal: 12,
         marginTop: 25
     },
 
     disabledButton: {
-        opacity: 0.6
+        opacity: 0.45
     },
 
-    signupText: {
+    signupButtonText: {
         color: "#FFFFFF",
         fontSize: 15,
-        fontWeight: "700"
+        fontWeight: "700",
+        textAlign: "center"
     },
 
     loginRow: {
         flexDirection: "row",
         justifyContent: "center",
+        alignItems: "center",
         marginTop: 22
     },
 

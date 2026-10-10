@@ -1,1360 +1,1275 @@
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    Alert,
-    ActivityIndicator,
-    StatusBar,
-    SafeAreaView,
-    ScrollView
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  StatusBar,
+  SafeAreaView,
+  ScrollView,
+  Alert,
+  Image,
+  Linking,
+  Platform,
 } from "react-native";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import {
-    Camera,
-    useCameraDevice,
-    useCameraPermission
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
 } from "react-native-vision-camera";
 
-import {
-    useBarcodeScannerOutput
-} from "react-native-vision-camera-barcode-scanner";
-
-
-function QrScanner() {
-
-    const device = useCameraDevice("back");
-
-    const {
-        hasPermission,
-        requestPermission
-    } = useCameraPermission();
-
-    const [scanned, setScanned] = useState(false);
-    const [scannedValue, setScannedValue] = useState(null);
-    const [student, setStudent] = useState(null);
-
-    const scannedRef = useRef(false);
-
-
-    // =====================================================
-    // CAMERA PERMISSION
-    // =====================================================
-
-    useEffect(() => {
-
-        if (!hasPermission) {
-            requestPermission();
-        }
-
-    }, [hasPermission, requestPermission]);
-
-
-    // =====================================================
-    // HANDLE QR
-    // =====================================================
-
-    const handleQRCode = (value) => {
-
-        if (scannedRef.current) {
-            return;
-        }
-
-        if (!value) {
-            return;
-        }
-
-        scannedRef.current = true;
-
-        try {
-
-            console.log("QR RAW VALUE:", value);
-
-            const studentData = JSON.parse(value);
-
-            console.log(
-                "PARSED STUDENT:",
-                studentData
-            );
-
-
-            if (
-                !studentData ||
-                typeof studentData !== "object"
-            ) {
-                throw new Error("Invalid QR data");
-            }
-
-
-            if (
-                !studentData.Name &&
-                !studentData.RollNO &&
-                !studentData.Refernceid
-            ) {
-                throw new Error(
-                    "Student information not found"
-                );
-            }
-
-
-            setScannedValue(value);
-
-            setStudent(studentData);
-
-            setScanned(true);
-
-        } catch (error) {
-
-            console.log(
-                "QR parsing error:",
-                error
-            );
-
-            scannedRef.current = false;
-
-            setScanned(false);
-
-            setScannedValue(null);
-
-            setStudent(null);
-
-            Alert.alert(
-                "Invalid Student QR",
-                "This QR code does not contain valid student information."
-            );
-
-        }
-
-    };
-
-
-    // =====================================================
-    // BARCODE SCANNER
-    // =====================================================
-
-    const barcodeOutput = useBarcodeScannerOutput({
-
-        barcodeFormats: ["qr-code"],
-
-        onBarcodeScanned: (barcodes) => {
-
-            if (
-                !barcodes ||
-                barcodes.length === 0
-            ) {
-                return;
-            }
-
-
-            const barcode = barcodes[0];
-
-
-            console.log(
-                "Barcode object:",
-                barcode
-            );
-
-
-            const value =
-                barcode?.value ??
-                barcode?.rawValue ??
-                barcode?.displayValue;
-
-
-            if (!value) {
-                return;
-            }
-
-
-            handleQRCode(value);
-
-        },
-
-
-        onError: (error) => {
-
-            console.warn(
-                "Barcode scanner error:",
-                error
-            );
-
-        }
-
-    });
-
-
-    // =====================================================
-    // SCAN AGAIN
-    // =====================================================
-
-    const scanAgain = () => {
-
-        scannedRef.current = false;
-
-        setScanned(false);
-
-        setScannedValue(null);
-
-        setStudent(null);
-
-    };
-
-
-    // =====================================================
-    // MASK AADHAAR
-    // =====================================================
-
-    const maskAadhar = (value) => {
-
-        if (!value) {
-            return "N/A";
-        }
-
-        const stringValue = String(value);
-
-        if (stringValue.length < 4) {
-            return "****";
-        }
-
-        return `XXXX XXXX ${stringValue.slice(-4)}`;
-
-    };
-
-
-    // =====================================================
-    // PERMISSION SCREEN
-    // =====================================================
-
-    if (!hasPermission) {
-
-        return (
-
-            <SafeAreaView style={styles.safeArea}>
-
-                <StatusBar barStyle="dark-content" />
-
-                <View style={styles.permissionContainer}>
-
-                    <View style={styles.permissionIcon}>
-                        <Text style={styles.permissionIconText}>
-                            📷
-                        </Text>
-                    </View>
-
-
-                    <Text style={styles.permissionTitle}>
-                        Camera Permission
-                    </Text>
-
-
-                    <Text style={styles.permissionDescription}>
-                        Camera access is required to scan
-                        student QR codes.
-                    </Text>
-
-
-                    <TouchableOpacity
-                        style={styles.primaryButton}
-                        onPress={requestPermission}
-                    >
-
-                        <Text style={styles.primaryButtonText}>
-                            Allow Camera
-                        </Text>
-
-                    </TouchableOpacity>
-
-                </View>
-
-            </SafeAreaView>
-
-        );
-
-    }
-
-
-    // =====================================================
-    // CAMERA LOADING
-    // =====================================================
-
-    if (!device) {
-
-        return (
-
-            <SafeAreaView style={styles.safeArea}>
-
-                <View style={styles.loadingContainer}>
-
-                    <ActivityIndicator size="large" />
-
-                    <Text style={styles.loadingTitle}>
-                        Starting camera...
-                    </Text>
-
-                    <Text style={styles.loadingDescription}>
-                        Please wait
-                    </Text>
-
-                </View>
-
-            </SafeAreaView>
-
-        );
-
-    }
-
-
-    // =====================================================
-    // MAIN PAGE
-    // =====================================================
-
-    return (
-
-        <SafeAreaView style={styles.safeArea}>
-
-            <StatusBar barStyle="dark-content" />
-
-
-            <View style={styles.container}>
-
-                {/* =================================================
-                    HEADER
-                ================================================= */}
-
-                <View style={styles.header}>
-
-                    <View>
-
-                        <Text style={styles.headerTitle}>
-                            QR Scanner
-                        </Text>
-
-                        <Text style={styles.headerSubtitle}>
-                            {student
-                                ? "Student information"
-                                : "Scan student ID"}
-                        </Text>
-
-                    </View>
-
-
-                    <View style={styles.headerIcon}>
-
-                        <Text style={styles.headerIconText}>
-                            ⌗
-                        </Text>
-
-                    </View>
-
-                </View>
-
-
-                {/* =================================================
-                    BEFORE SCANNING
-                ================================================= */}
-
-                {!student ? (
-
-                    <View style={styles.content}>
-
-                        <View style={styles.instruction}>
-
-                            <Text style={styles.instructionTitle}>
-                                Scan Student QR
-                            </Text>
-
-                            <Text style={styles.instructionText}>
-                                Position the QR code inside the frame below
-                            </Text>
-
-                        </View>
-
-
-                        {/* CAMERA */}
-
-                        <View style={styles.scannerWrapper}>
-
-                            <Camera
-                                style={styles.camera}
-                                device={device}
-                                isActive={!scanned}
-                                outputs={[barcodeOutput]}
-                            />
-
-
-                            {/* CAMERA OVERLAY */}
-
-                            <View
-                                pointerEvents="none"
-                                style={styles.scannerOverlay}
-                            >
-
-                                <View style={styles.scanFrame}>
-
-                                    <View
-                                        style={[
-                                            styles.corner,
-                                            styles.topLeft
-                                        ]}
-                                    />
-
-                                    <View
-                                        style={[
-                                            styles.corner,
-                                            styles.topRight
-                                        ]}
-                                    />
-
-                                    <View
-                                        style={[
-                                            styles.corner,
-                                            styles.bottomLeft
-                                        ]}
-                                    />
-
-                                    <View
-                                        style={[
-                                            styles.corner,
-                                            styles.bottomRight
-                                        ]}
-                                    />
-
-
-                                    {!scanned && (
-                                        <View
-                                            style={styles.scanLine}
-                                        />
-                                    )}
-
-                                </View>
-
-
-                                <Text style={styles.scanInstruction}>
-                                    Place QR code inside the frame
-                                </Text>
-
-                            </View>
-
-                        </View>
-
-
-                        {/* TIP */}
-
-                        <View style={styles.tipContainer}>
-
-                            <Text style={styles.tipIcon}>
-                                💡
-                            </Text>
-
-
-                            <View style={styles.tipContent}>
-
-                                <Text style={styles.tipTitle}>
-                                    Scanning Tip
-                                </Text>
-
-                                <Text style={styles.tipText}>
-                                    Keep the QR code clearly visible
-                                    and avoid glare.
-                                </Text>
-
-                            </View>
-
-                        </View>
-
-                    </View>
-
-                ) : (
-
-                    /* =================================================
-                       AFTER SCANNING
-                    ================================================= */
-
-                    <ScrollView
-                        style={styles.formScroll}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={
-                            styles.formContainer
-                        }
-                    >
-
-                        {/* SUCCESS HEADER */}
-
-                        <View style={styles.successContainer}>
-
-                            <View style={styles.successIcon}>
-
-                                <Text style={styles.successIconText}>
-                                    ✓
-                                </Text>
-
-                            </View>
-
-
-                            <View>
-
-                                <Text style={styles.successTitle}>
-                                    Student Found
-                                </Text>
-
-                                <Text style={styles.successSubtitle}>
-                                    QR code scanned successfully
-                                </Text>
-
-                            </View>
-
-                        </View>
-
-
-                        {/* =================================================
-                            STUDENT FORM
-                        ================================================= */}
-
-                        <View style={styles.formCard}>
-
-                            <Text style={styles.formTitle}>
-                                Student Information
-                            </Text>
-
-                            <Text style={styles.formSubtitle}>
-                                Details decoded from the QR code
-                            </Text>
-
-
-                            {/* NAME */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Full Name
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {student?.Name || "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* ROLL NUMBER */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Roll Number
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {student?.RollNO || "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* BRANCH */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Branch
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {student?.branch || "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* BATCH */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Batch
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {student?.batch || "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* MOBILE */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Mobile Number
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {student?.MobileNo || "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* AADHAAR */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Aadhaar Number
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text style={styles.inputText}>
-                                        {maskAadhar(
-                                            student?.Aadhar
-                                        )}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* REFERENCE ID */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Reference ID
-                                </Text>
-
-                                <View style={styles.inputBox}>
-
-                                    <Text
-                                        style={styles.smallInputText}
-                                        numberOfLines={1}
-                                    >
-                                        {student?.Refernceid ||
-                                            "N/A"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* VERIFICATION */}
-
-                            <View style={styles.field}>
-
-                                <Text style={styles.fieldLabel}>
-                                    Verification Status
-                                </Text>
-
-
-                                <View
-                                    style={
-                                        student?.verified
-                                            ? styles.verifiedBox
-                                            : styles.notVerifiedBox
-                                    }
-                                >
-
-                                    <Text
-                                        style={
-                                            student?.verified
-                                                ? styles.verifiedText
-                                                : styles.notVerifiedText
-                                        }
-                                    >
-
-                                        {student?.verified
-                                            ? "✓ Student Verified"
-                                            : "⚠ Student Not Verified"}
-
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-                        </View>
-
-
-                        {/* =================================================
-                            DOCUMENTS
-                        ================================================= */}
-
-                        <View style={styles.documentsCard}>
-
-                            <Text style={styles.formTitle}>
-                                Documents
-                            </Text>
-
-                            <Text style={styles.formSubtitle}>
-                                Uploaded document references
-                            </Text>
-
-
-                            {/* PROFILE IMAGE */}
-
-                            <View style={styles.documentRow}>
-
-                                <View>
-
-                                    <Text style={styles.documentTitle}>
-                                        Profile Photo
-                                    </Text>
-
-                                    <Text
-                                        style={styles.documentUrl}
-                                        numberOfLines={1}
-                                    >
-                                        {student?.url || "Not available"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-
-                            {/* AADHAAR IMAGE */}
-
-                            <View style={styles.documentRow}>
-
-                                <View>
-
-                                    <Text style={styles.documentTitle}>
-                                        Aadhaar Document
-                                    </Text>
-
-                                    <Text
-                                        style={styles.documentUrl}
-                                        numberOfLines={1}
-                                    >
-                                        {student?.urlAadhar ||
-                                            "Not available"}
-                                    </Text>
-
-                                </View>
-
-                            </View>
-
-                        </View>
-
-
-                        {/* =================================================
-                            QR RAW DATA
-                        ================================================= */}
-
-                        {scannedValue && (
-
-                            <View style={styles.qrDataCard}>
-
-                                <Text style={styles.formTitle}>
-                                    QR Data
-                                </Text>
-
-                                <Text
-                                    style={styles.qrDataText}
-                                    numberOfLines={5}
-                                >
-                                    {scannedValue}
-                                </Text>
-
-                            </View>
-
-                        )}
-
-
-                        {/* =================================================
-                            SCAN AGAIN
-                        ================================================= */}
-
-                        <TouchableOpacity
-                            style={styles.scanAgainButton}
-                            onPress={scanAgain}
-                        >
-
-                            <Text style={styles.scanAgainIcon}>
-                                ↻
-                            </Text>
-
-                            <Text style={styles.scanAgainText}>
-                                Scan Another Student
-                            </Text>
-
-                        </TouchableOpacity>
-
-                    </ScrollView>
-
-                )}
-
-            </View>
-
-        </SafeAreaView>
-
+import { useBarcodeScannerOutput } from "react-native-vision-camera-barcode-scanner";
+
+const BASE_URL = "http://10.162.135.224:5001";
+const VERIFY_URL = `${BASE_URL}/admin/status`;
+const TOKEN_KEY = "adminToken";
+
+/*
+|--------------------------------------------------------------------------
+| Cross-platform alerts
+|--------------------------------------------------------------------------
+*/
+
+const showMessage = (title, message) => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.alert(`${title}\n\n${message}`);
+    return;
+  }
+
+  Alert.alert(title, message);
+};
+
+/*
+|--------------------------------------------------------------------------
+| URL normalization
+|--------------------------------------------------------------------------
+*/
+
+const cleanImageUrl = (value) => {
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+
+  let input = value.trim();
+
+  const markdownImageMatch = input.match(
+    /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/
+  );
+
+  if (markdownImageMatch) {
+    input = markdownImageMatch[1];
+  } else {
+    const markdownLinkMatch = input.match(
+      /\]\((https?:\/\/[^)\s]+)\)/
     );
 
-}
-
-
-export default QrScanner;
-
-
-// ============================================================
-// STYLES
-// ============================================================
-
-const styles = StyleSheet.create({
-
-    safeArea: {
-        flex: 1,
-        backgroundColor: "#FFF8F0"
-    },
-
-    container: {
-        flex: 1,
-        backgroundColor: "#FFF8F0"
-    },
-
-
-    // ========================================================
-    // HEADER
-    // ========================================================
-
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: 22,
-        paddingTop: 16,
-        paddingBottom: 15
-    },
-
-    headerTitle: {
-        fontSize: 26,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-    headerSubtitle: {
-        fontSize: 13,
-        color: "#888",
-        marginTop: 3
-    },
-
-    headerIcon: {
-        width: 45,
-        height: 45,
-        borderRadius: 14,
-        backgroundColor: "#F3E8E1",
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-    headerIconText: {
-        fontSize: 27,
-        color: "#B64216",
-        fontWeight: "700"
-    },
-
-
-    // ========================================================
-    // CAMERA CONTENT
-    // ========================================================
-
-    content: {
-        flex: 1,
-        paddingHorizontal: 20
-    },
-
-    instruction: {
-        marginTop: 5,
-        marginBottom: 16
-    },
-
-    instructionTitle: {
-        fontSize: 19,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-    instructionText: {
-        fontSize: 13,
-        color: "#777",
-        marginTop: 5,
-        lineHeight: 19
-    },
-
-
-    // ========================================================
-    // CAMERA
-    // ========================================================
-
-    scannerWrapper: {
-        width: "100%",
-        height: 350,
-        borderRadius: 24,
-        overflow: "hidden",
-        backgroundColor: "#111",
-
-        elevation: 5,
-
-        shadowColor: "#000",
-
-        shadowOffset: {
-            width: 0,
-            height: 4
-        },
-
-        shadowOpacity: 0.15,
-
-        shadowRadius: 8
-    },
-
-    camera: {
-        flex: 1
-    },
-
-    scannerOverlay: {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-    scanFrame: {
-        width: 230,
-        height: 230,
-        position: "relative"
-    },
-
-    corner: {
-        position: "absolute",
-        width: 35,
-        height: 35,
-        borderColor: "#FFFFFF"
-    },
-
-    topLeft: {
-        top: 0,
-        left: 0,
-        borderTopWidth: 4,
-        borderLeftWidth: 4,
-        borderTopLeftRadius: 10
-    },
-
-    topRight: {
-        top: 0,
-        right: 0,
-        borderTopWidth: 4,
-        borderRightWidth: 4,
-        borderTopRightRadius: 10
-    },
-
-    bottomLeft: {
-        bottom: 0,
-        left: 0,
-        borderBottomWidth: 4,
-        borderLeftWidth: 4,
-        borderBottomLeftRadius: 10
-    },
-
-    bottomRight: {
-        bottom: 0,
-        right: 0,
-        borderBottomWidth: 4,
-        borderRightWidth: 4,
-        borderBottomRightRadius: 10
-    },
-
-    scanLine: {
-        position: "absolute",
-        left: 8,
-        right: 8,
-        top: "50%",
-        height: 2,
-        backgroundColor: "#FFFFFF"
-    },
-
-    scanInstruction: {
-        color: "#FFFFFF",
-        fontSize: 13,
-        fontWeight: "600",
-        marginTop: 22,
-        textAlign: "center"
-    },
-
-
-    // ========================================================
-    // TIP
-    // ========================================================
-
-    tipContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#FFFFFF",
-        borderRadius: 15,
-        padding: 14,
-        marginTop: 16
-    },
-
-    tipIcon: {
-        fontSize: 22,
-        marginRight: 12
-    },
-
-    tipContent: {
-        flex: 1
-    },
-
-    tipTitle: {
-        fontSize: 13,
-        fontWeight: "800",
-        color: "#333"
-    },
-
-    tipText: {
-        fontSize: 12,
-        color: "#888",
-        marginTop: 3,
-        lineHeight: 17
-    },
-
-
-    // ========================================================
-    // FORM
-    // ========================================================
-
-    formScroll: {
-        flex: 1
-    },
-
-    formContainer: {
-        paddingHorizontal: 20,
-        paddingBottom: 35
-    },
-
-    successContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#E8F7EC",
-        borderRadius: 16,
-        padding: 15,
-        marginBottom: 15
-    },
-
-    successIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: "#FFFFFF",
-        justifyContent: "center",
-        alignItems: "center",
-        marginRight: 13
-    },
-
-    successIconText: {
-        fontSize: 26,
-        fontWeight: "800",
-        color: "#218838"
-    },
-
-    successTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#218838"
-    },
-
-    successSubtitle: {
-        fontSize: 12,
-        color: "#6A8B70",
-        marginTop: 3
-    },
-
-
-    // ========================================================
-    // FORM CARD
-    // ========================================================
-
-    formCard: {
-        backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 18,
-        elevation: 3,
-
-        shadowColor: "#000",
-
-        shadowOffset: {
-            width: 0,
-            height: 3
-        },
-
-        shadowOpacity: 0.07,
-
-        shadowRadius: 8
-    },
-
-    formTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-    formSubtitle: {
-        fontSize: 12,
-        color: "#888",
-        marginTop: 4,
-        marginBottom: 18
-    },
-
-    field: {
-        marginBottom: 15
-    },
-
-    fieldLabel: {
-        fontSize: 12,
-        fontWeight: "700",
-        color: "#666",
-        marginBottom: 7
-    },
-
-    inputBox: {
-        minHeight: 48,
-        borderRadius: 11,
-        backgroundColor: "#F8F6F4",
-        borderWidth: 1,
-        borderColor: "#EDE8E4",
-        justifyContent: "center",
-        paddingHorizontal: 13
-    },
-
-    inputText: {
-        fontSize: 14,
-        fontWeight: "600",
-        color: "#292929"
-    },
-
-    smallInputText: {
-        fontSize: 12,
-        fontWeight: "600",
-        color: "#555"
-    },
-
-
-    // ========================================================
-    // VERIFICATION
-    // ========================================================
-
-    verifiedBox: {
-        minHeight: 48,
-        borderRadius: 11,
-        backgroundColor: "#E8F7EC",
-        justifyContent: "center",
-        paddingHorizontal: 13
-    },
-
-    verifiedText: {
-        color: "#218838",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-    notVerifiedBox: {
-        minHeight: 48,
-        borderRadius: 11,
-        backgroundColor: "#FFF0E6",
-        justifyContent: "center",
-        paddingHorizontal: 13
-    },
-
-    notVerifiedText: {
-        color: "#B64216",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-
-    // ========================================================
-    // DOCUMENTS
-    // ========================================================
-
-    documentsCard: {
-        backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 18,
-        marginTop: 15,
-
-        elevation: 2
-    },
-
-    documentRow: {
-        paddingVertical: 13,
-        borderTopWidth: 1,
-        borderTopColor: "#F0ECE9"
-    },
-
-    documentTitle: {
-        fontSize: 13,
-        fontWeight: "700",
-        color: "#333"
-    },
-
-    documentUrl: {
-        fontSize: 11,
-        color: "#999",
-        marginTop: 5
-    },
-
-
-    // ========================================================
-    // QR RAW DATA
-    // ========================================================
-
-    qrDataCard: {
-        backgroundColor: "#F8F5F2",
-        borderRadius: 16,
-        padding: 15,
-        marginTop: 15
-    },
-
-    qrDataText: {
-        fontSize: 10,
-        color: "#888",
-        lineHeight: 16
-    },
-
-
-    // ========================================================
-    // SCAN AGAIN
-    // ========================================================
-
-    scanAgainButton: {
-        height: 52,
-        borderRadius: 12,
-        backgroundColor: "#B64216",
-        marginTop: 17,
-
-        flexDirection: "row",
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-    scanAgainIcon: {
-        color: "#FFFFFF",
-        fontSize: 22,
-        marginRight: 8
-    },
-
-    scanAgainText: {
-        color: "#FFFFFF",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-
-    // ========================================================
-    // PERMISSION
-    // ========================================================
-
-    permissionContainer: {
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-        paddingHorizontal: 35
-    },
-
-    permissionIcon: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: "#F3E8E1",
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 20
-    },
-
-    permissionIconText: {
-        fontSize: 35
-    },
-
-    permissionTitle: {
-        fontSize: 23,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-    permissionDescription: {
-        fontSize: 14,
-        color: "#777",
-        textAlign: "center",
-        lineHeight: 21,
-        marginTop: 8,
-        marginBottom: 20
-    },
-
-    primaryButton: {
-        backgroundColor: "#B64216",
-        paddingHorizontal: 28,
-        paddingVertical: 14,
-        borderRadius: 11
-    },
-
-    primaryButtonText: {
-        color: "#FFFFFF",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-
-    // ========================================================
-    // LOADING
-    // ========================================================
-
-    loadingContainer: {
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-    loadingTitle: {
-        fontSize: 16,
-        fontWeight: "700",
-        color: "#444",
-        marginTop: 14
-    },
-
-    loadingDescription: {
-        fontSize: 13,
-        color: "#888",
-        marginTop: 4
+    if (markdownLinkMatch) {
+      input = markdownLinkMatch[1];
+    } else {
+      const plainUrlMatch = input.match(
+        /https?:\/\/[^\s\])"'<>]+/
+      );
+
+      if (!plainUrlMatch) {
+        return "";
+      }
+
+      input = plainUrlMatch[0];
+    }
+  }
+
+  input = input.replace(/[.,;]+$/, "");
+
+  try {
+    const parsed = new URL(input);
+
+    if (
+      parsed.protocol !== "https:" &&
+      parsed.protocol !== "http:"
+    ) {
+      return "";
     }
 
+    return parsed.href;
+  } catch {
+    return "";
+  }
+};
+
+const getFirstValidImageUrl = (...values) => {
+  for (const value of values) {
+    const url = cleanImageUrl(value);
+
+    if (url) {
+      return url;
+    }
+  }
+
+  return "";
+};
+
+const getStudentReference = (data) =>
+  data?.Referenceid ??
+  data?.Refernceid ??
+  data?.referenceId ??
+  null;
+
+const getProfileUrl = (student) =>
+  getFirstValidImageUrl(
+    student?.url,
+    student?.profileImage,
+    student?.profilePhoto,
+    student?.photo,
+    student?.imageUrl,
+    student?.profileUrl,
+    student?.photoUrl
+  );
+
+const getAadharUrl = (student) =>
+  getFirstValidImageUrl(
+    student?.urlAadhar,
+    student?.aadharImage,
+    student?.aadharPhoto,
+    student?.aadharUrl,
+    student?.aadhaarImage,
+    student?.aadhaarPhoto
+  );
+
+/*
+|--------------------------------------------------------------------------
+| Main QR scanner
+|--------------------------------------------------------------------------
+*/
+
+export default function QrScanner() {
+  const device = useCameraDevice("back");
+  const { hasPermission, requestPermission } = useCameraPermission();
+
+  const [student, setStudent] = useState(null);
+  const [scanning, setScanning] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
+  const [loadingAadhar, setLoadingAadhar] = useState(false);
+
+  const [profilePhotoError, setProfilePhotoError] = useState(false);
+  const [aadharPhotoError, setAadharPhotoError] = useState(false);
+
+  const scannedRef = useRef(false);
+  const verifyInFlightRef = useRef(false);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Camera permission
+  |--------------------------------------------------------------------------
+  */
+
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission();
+    }
+  }, [hasPermission, requestPermission]);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Handle scanned QR code
+  |--------------------------------------------------------------------------
+  */
+
+  const handleBarcodeScanned = useCallback((barcodes) => {
+    if (scannedRef.current || !barcodes?.length) {
+      return;
+    }
+
+    const rawValue = barcodes[0]?.rawValue;
+
+    if (!rawValue) {
+      return;
+    }
+
+    scannedRef.current = true;
+    setScanning(false);
+
+    try {
+      const data = JSON.parse(rawValue);
+
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data)
+      ) {
+        throw new Error("Invalid student data.");
+      }
+
+      const normalizedStudent = {
+        ...data,
+        Referenceid: getStudentReference(data),
+      };
+
+      console.log("Scanned student:", normalizedStudent);
+
+      console.log("Profile URL:", getProfileUrl(normalizedStudent));
+      console.log("Aadhaar URL:", getAadharUrl(normalizedStudent));
+
+      setStudent(normalizedStudent);
+
+      setLoadingPhoto(Boolean(getProfileUrl(normalizedStudent)));
+      setLoadingAadhar(Boolean(getAadharUrl(normalizedStudent)));
+
+      setProfilePhotoError(false);
+      setAadharPhotoError(false);
+    } catch (error) {
+      console.error("QR parsing error:", error);
+
+      scannedRef.current = false;
+      setScanning(true);
+
+      showMessage(
+        "Invalid QR Code",
+        "The QR code must contain valid student JSON data."
+      );
+    }
+  }, []);
+
+  const barcodeOutput = useBarcodeScannerOutput({
+    barcodeFormats: ["qr-code"],
+    onBarcodeScanned: handleBarcodeScanned,
+    onError: (error) => {
+      console.log("Barcode scanner error:", error);
+    },
+  });
+
+  /*
+  |--------------------------------------------------------------------------
+  | Reset scanner
+  |--------------------------------------------------------------------------
+  */
+
+  const resetScanner = () => {
+    if (verifyInFlightRef.current) {
+      showMessage(
+        "Please Wait",
+        "Student verification is still in progress."
+      );
+      return;
+    }
+
+    scannedRef.current = false;
+
+    setStudent(null);
+    setScanning(true);
+
+    setLoadingPhoto(false);
+    setLoadingAadhar(false);
+
+    setProfilePhotoError(false);
+    setAadharPhotoError(false);
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Open image/document
+  |--------------------------------------------------------------------------
+  */
+
+  const openDocument = async (url) => {
+    const cleanedUrl = cleanImageUrl(url);
+
+    if (!cleanedUrl) {
+      showMessage(
+        "Invalid URL",
+        "This document does not have a valid URL."
+      );
+      return;
+    }
+
+    try {
+      if (Platform.OS === "web") {
+        if (typeof window !== "undefined") {
+          window.open(cleanedUrl, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+
+      const supported = await Linking.canOpenURL(cleanedUrl);
+
+      if (!supported) {
+        showMessage(
+          "Unable to Open",
+          "Your device cannot open this document URL."
+        );
+        return;
+      }
+
+      await Linking.openURL(cleanedUrl);
+    } catch (error) {
+      console.error("Open document error:", error);
+
+      showMessage("Error", "Could not open the document.");
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Verify student with admin token
+  |--------------------------------------------------------------------------
+  |
+  | Sends the token in:
+  | 1. Authorization: Bearer <token>
+  | 2. JSON body: { token, RollNo }
+  |
+  | The backend must validate the token and authorize the admin.
+  */
+
+  const verifyStudent = async () => {
+    if (verifyInFlightRef.current) {
+      return;
+    }
+
+    if (!student?.RollNO) {
+      showMessage(
+        "Missing Roll Number",
+        "The scanned QR code does not contain the student's roll number."
+      );
+      return;
+    }
+
+    verifyInFlightRef.current = true;
+    setVerifying(true);
+
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      if (!token) {
+        showMessage(
+          "Login Required",
+          "Admin token was not found. Please log in again."
+        );
+        return;
+      }
+
+      const response = await fetch(VERIFY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          token,
+          RollNo: String(student.RollNO),
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+
+      console.log(
+        "Student verification response:",
+        response.status,
+        result
+      );
+
+      /*
+       * Handle an already-verified student.
+       * Your backend uses HTTP 409 for this case.
+       */
+      if (response.status === 409) {
+        const existingStudent =
+          result.data?.student ||
+          result.student ||
+          result.data ||
+          {};
+
+        setStudent((current) => ({
+          ...current,
+          ...existingStudent,
+          verified: true,
+        }));
+
+        showMessage(
+          "Already Verified",
+          result.msg ||
+            result.message ||
+            "This student has already been verified."
+        );
+
+        return;
+      }
+
+      if (!response.ok || result.success === false) {
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(
+            "Admin authentication failed. Please log in again and check your admin permissions."
+          );
+        }
+
+        throw new Error(
+          result.msg ||
+            result.message ||
+            result.error ||
+            `Verification failed (${response.status}).`
+        );
+      }
+
+      const updatedStudent =
+        result.data?.student ||
+        result.student ||
+        result.data ||
+        {};
+
+      setStudent((current) => ({
+        ...current,
+        ...updatedStudent,
+        verified: updatedStudent.verified ?? true,
+        verifiedBy:
+          updatedStudent.verifiedBy ?? current.verifiedBy,
+        verifiedAt:
+          updatedStudent.verifiedAt ??
+          current.verifiedAt ??
+          new Date().toISOString(),
+      }));
+
+      showMessage(
+        "Success",
+        result.msg ||
+          result.message ||
+          "Student verified successfully."
+      );
+    } catch (error) {
+      console.error("Verification error:", error);
+
+      showMessage(
+        "Verification Failed",
+        error.message ||
+          "Unable to connect to the verification server."
+      );
+    } finally {
+      verifyInFlightRef.current = false;
+      setVerifying(false);
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Current image URLs
+  |--------------------------------------------------------------------------
+  */
+
+  const profilePhotoUrl = getProfileUrl(student);
+  const aadharPhotoUrl = getAadharUrl(student);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Camera permission screen
+  |--------------------------------------------------------------------------
+  */
+
+  if (!hasPermission) {
+    return (
+      <SafeAreaView style={styles.centerScreen}>
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="#FFF8F0"
+        />
+
+        <Text style={styles.permissionTitle}>
+          Camera Permission Required
+        </Text>
+
+        <Text style={styles.permissionText}>
+          Allow camera access to scan student QR codes.
+        </Text>
+
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={requestPermission}
+        >
+          <Text style={styles.primaryButtonText}>
+            Allow Camera
+          </Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Camera initialization
+  |--------------------------------------------------------------------------
+  */
+
+  if (!device && scanning && !student) {
+    return (
+      <SafeAreaView style={styles.centerScreen}>
+        <ActivityIndicator size="large" color="#B64216" />
+
+        <Text style={styles.permissionText}>
+          Initializing camera...
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Main screen
+  |--------------------------------------------------------------------------
+  */
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#FFF8F0"
+      />
+
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>
+          Student Verification
+        </Text>
+
+        <Text style={styles.headerSubtitle}>
+          Scan a student's QR code to view their details.
+        </Text>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {scanning && !student && device ? (
+          <View style={styles.scannerCard}>
+            <View style={styles.cameraContainer}>
+              <Camera
+                style={StyleSheet.absoluteFill}
+                device={device}
+                isActive={scanning}
+                outputs={[barcodeOutput]}
+              />
+
+              <View
+                pointerEvents="none"
+                style={styles.scanOverlay}
+              >
+                <View style={styles.scanFrame}>
+                  <View style={[styles.corner, styles.topLeft]} />
+                  <View style={[styles.corner, styles.topRight]} />
+                  <View style={[styles.corner, styles.bottomLeft]} />
+                  <View style={[styles.corner, styles.bottomRight]} />
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.scanTitle}>
+              Scan Student QR
+            </Text>
+
+            <Text style={styles.scanSubtitle}>
+              Place the student's QR code inside the frame.
+            </Text>
+          </View>
+        ) : null}
+
+        {student ? (
+          <>
+            {/* Student header */}
+
+            <View style={styles.studentHeader}>
+              {profilePhotoUrl && !profilePhotoError ? (
+                <Image
+                  key={profilePhotoUrl}
+                  source={{ uri: profilePhotoUrl }}
+                  style={styles.avatarImage}
+                  resizeMode="cover"
+                  onError={() => setProfilePhotoError(true)}
+                />
+              ) : (
+                <View style={styles.studentAvatar}>
+                  <Text style={styles.avatarText}>
+                    {(student.Name || "S")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.studentHeaderText}>
+                <Text style={styles.studentName}>
+                  {student.Name || "Student"}
+                </Text>
+
+                <Text style={styles.studentRoll}>
+                  Roll No: {student.RollNO || "Not available"}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.statusBadge,
+                  student.verified
+                    ? styles.verifiedBadge
+                    : styles.pendingBadge,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusText,
+                    student.verified
+                      ? styles.verifiedText
+                      : styles.pendingText,
+                  ]}
+                >
+                  {student.verified ? "Verified" : "Pending"}
+                </Text>
+              </View>
+            </View>
+
+            {/* Student details */}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Student Details
+              </Text>
+
+              <InfoField label="Full Name" value={student.Name} />
+
+              <InfoField
+                label="Reference ID"
+                value={student.Referenceid}
+              />
+
+              <InfoField
+                label="Roll Number"
+                value={student.RollNO}
+              />
+
+              <InfoField label="Batch" value={student.batch} />
+
+              <InfoField label="Branch" value={student.branch} />
+
+              <InfoField
+                label="Mobile Number"
+                value={student.MobileNo}
+              />
+
+              <InfoField
+                label="Email"
+                value={student.email}
+              />
+            </View>
+
+            {/* Profile photo */}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Profile Photo
+              </Text>
+
+              <Text style={styles.cardSubtitle}>
+                Student's uploaded profile photograph.
+              </Text>
+
+              {profilePhotoUrl && !profilePhotoError ? (
+                <>
+                  <View style={styles.imageContainer}>
+                    {loadingPhoto ? (
+                      <ActivityIndicator
+                        style={styles.imageLoader}
+                        size="large"
+                        color="#B64216"
+                      />
+                    ) : null}
+
+                    <Image
+                      key={profilePhotoUrl}
+                      source={{ uri: profilePhotoUrl }}
+                      style={styles.documentImage}
+                      resizeMode="contain"
+                      onLoadStart={() => setLoadingPhoto(true)}
+                      onLoad={() => {
+                        setLoadingPhoto(false);
+                        setProfilePhotoError(false);
+                      }}
+                      onError={() => {
+                        setLoadingPhoto(false);
+                        setProfilePhotoError(true);
+                      }}
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => openDocument(profilePhotoUrl)}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      Open Profile Photo
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <EmptyDocument
+                  title="Profile Photo Unavailable"
+                  message={
+                    profilePhotoUrl
+                      ? "The image could not be loaded. Check the URL and server access."
+                      : "No profile image URL was found in the scanned QR data."
+                  }
+                />
+              )}
+
+              {profilePhotoUrl ? (
+                <Text style={styles.debugUrl}>
+                  Image URL: {profilePhotoUrl}
+                </Text>
+              ) : null}
+            </View>
+
+            {/* Aadhaar document */}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Aadhaar Document
+              </Text>
+
+              <Text style={styles.cardSubtitle}>
+                Student's uploaded Aadhaar photograph.
+              </Text>
+
+              {aadharPhotoUrl && !aadharPhotoError ? (
+                <>
+                  <View style={styles.imageContainer}>
+                    {loadingAadhar ? (
+                      <ActivityIndicator
+                        style={styles.imageLoader}
+                        size="large"
+                        color="#B64216"
+                      />
+                    ) : null}
+
+                    <Image
+                      key={aadharPhotoUrl}
+                      source={{ uri: aadharPhotoUrl }}
+                      style={styles.documentImage}
+                      resizeMode="contain"
+                      onLoadStart={() => setLoadingAadhar(true)}
+                      onLoad={() => {
+                        setLoadingAadhar(false);
+                        setAadharPhotoError(false);
+                      }}
+                      onError={() => {
+                        setLoadingAadhar(false);
+                        setAadharPhotoError(true);
+                      }}
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => openDocument(aadharPhotoUrl)}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      Open Aadhaar Image
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <EmptyDocument
+                  title="Aadhaar Image Unavailable"
+                  message={
+                    aadharPhotoUrl
+                      ? "The Aadhaar image could not be loaded."
+                      : "No Aadhaar image URL was found in the scanned QR data."
+                  }
+                />
+              )}
+            </View>
+
+            {/* Verification */}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Verification
+              </Text>
+
+              <Text style={styles.cardSubtitle}>
+                Review the student's details and documents before
+                approving the record.
+              </Text>
+
+              {student.verified ? (
+                <View style={styles.alreadyVerified}>
+                  <Text style={styles.alreadyVerifiedText}>
+                    This student is already verified.
+                  </Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    verifying && styles.disabledButton,
+                  ]}
+                  onPress={verifyStudent}
+                  disabled={verifying}
+                >
+                  {verifying ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      Verify Student
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.resetButton,
+                verifying && styles.disabledButton,
+              ]}
+              onPress={resetScanner}
+              disabled={verifying}
+            >
+              <Text style={styles.resetButtonText}>
+                Scan Another Student
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Reusable components
+|--------------------------------------------------------------------------
+*/
+
+function InfoField({ label, value }) {
+  return (
+    <View style={styles.infoField}>
+      <Text style={styles.infoLabel}>{label}</Text>
+
+      <Text style={styles.infoValue}>
+        {value === null ||
+        value === undefined ||
+        String(value).trim() === ""
+          ? "Not available"
+          : String(value)}
+      </Text>
+    </View>
+  );
+}
+
+function EmptyDocument({ title, message }) {
+  return (
+    <View style={styles.emptyDocument}>
+      <Text style={styles.emptyIcon}>▧</Text>
+
+      <Text style={styles.emptyTitle}>{title}</Text>
+
+      <Text style={styles.emptyText}>{message}</Text>
+    </View>
+  );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Styles
+|--------------------------------------------------------------------------
+*/
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#FFF8F0",
+  },
+
+  centerScreen: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFF8F0",
+    padding: 24,
+  },
+
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+
+  headerTitle: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: "#3D241A",
+  },
+
+  headerSubtitle: {
+    color: "#856C60",
+    fontSize: 14,
+    marginTop: 6,
+    lineHeight: 20,
+  },
+
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+    width: "100%",
+    maxWidth: 850,
+    alignSelf: "center",
+  },
+
+  scannerCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 14,
+    marginBottom: 18,
+    elevation: 3,
+  },
+
+  cameraContainer: {
+    height: 300,
+    overflow: "hidden",
+    borderRadius: 15,
+    backgroundColor: "#241B18",
+  },
+
+  scanOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  scanFrame: {
+    width: 220,
+    height: 220,
+    position: "relative",
+  },
+
+  corner: {
+    width: 35,
+    height: 35,
+    position: "absolute",
+    borderColor: "#FFFFFF",
+  },
+
+  topLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopLeftRadius: 10,
+  },
+
+  topRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopRightRadius: 10,
+  },
+
+  bottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomLeftRadius: 10,
+  },
+
+  bottomRight: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomRightRadius: 10,
+  },
+
+  scanTitle: {
+    color: "#3D241A",
+    fontSize: 19,
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 18,
+  },
+
+  scanSubtitle: {
+    color: "#856C60",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 7,
+    marginBottom: 5,
+  },
+
+  studentHeader: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    elevation: 2,
+  },
+
+  studentAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#F8E1D5",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+
+  avatarImage: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#F8E1D5",
+    marginRight: 12,
+  },
+
+  avatarText: {
+    color: "#B64216",
+    fontSize: 23,
+    fontWeight: "800",
+  },
+
+  studentHeaderText: {
+    flex: 1,
+  },
+
+  studentName: {
+    color: "#3D241A",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
+  studentRoll: {
+    color: "#856C60",
+    fontSize: 12,
+    marginTop: 5,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+
+  verifiedBadge: {
+    backgroundColor: "#DDF5E5",
+  },
+
+  pendingBadge: {
+    backgroundColor: "#FFF0D4",
+  },
+
+  statusText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
+  verifiedText: {
+    color: "#187343",
+  },
+
+  pendingText: {
+    color: "#98600B",
+  },
+
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 17,
+    marginBottom: 16,
+    elevation: 2,
+  },
+
+  cardTitle: {
+    color: "#3D241A",
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 7,
+  },
+
+  cardSubtitle: {
+    color: "#856C60",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 14,
+  },
+
+  infoField: {
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1E7DF",
+  },
+
+  infoLabel: {
+    color: "#8A766A",
+    fontSize: 12,
+    marginBottom: 5,
+  },
+
+  infoValue: {
+    color: "#3D241A",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  imageContainer: {
+    minHeight: 190,
+    width: "100%",
+    borderRadius: 12,
+    backgroundColor: "#F7F1EC",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  documentImage: {
+    width: "100%",
+    height: 250,
+    backgroundColor: "#F7F1EC",
+  },
+
+  imageLoader: {
+    position: "absolute",
+    zIndex: 2,
+  },
+
+  emptyDocument: {
+    minHeight: 150,
+    borderWidth: 1,
+    borderColor: "#E9DCD2",
+    borderStyle: "dashed",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    backgroundColor: "#FCF8F4",
+  },
+
+  emptyIcon: {
+    fontSize: 35,
+    color: "#B64216",
+    marginBottom: 8,
+  },
+
+  emptyTitle: {
+    fontSize: 14,
+    color: "#3D241A",
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+
+  emptyText: {
+    fontSize: 13,
+    color: "#856C60",
+    textAlign: "center",
+    lineHeight: 19,
+  },
+
+  debugUrl: {
+    fontSize: 11,
+    color: "#8A766A",
+    marginTop: 12,
+    lineHeight: 17,
+  },
+
+  primaryButton: {
+    minHeight: 50,
+    backgroundColor: "#B64216",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginTop: 10,
+  },
+
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  secondaryButton: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#B64216",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    paddingHorizontal: 12,
+  },
+
+  secondaryButtonText: {
+    color: "#B64216",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+
+  alreadyVerified: {
+    backgroundColor: "#E5F6E9",
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 8,
+  },
+
+  alreadyVerifiedText: {
+    color: "#187343",
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  disabledButton: {
+    opacity: 0.65,
+  },
+
+  resetButton: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderColor: "#B64216",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+
+  resetButtonText: {
+    color: "#B64216",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  permissionTitle: {
+    color: "#3D241A",
+    fontSize: 21,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+
+  permissionText: {
+    color: "#856C60",
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 21,
+    marginBottom: 18,
+    marginTop: 10,
+  },
 });
-
-

@@ -1,48 +1,34 @@
-import React, {
-    useCallback,
-    useState
-} from "react";
 
+import React, { useCallback, useState } from "react";
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
     FlatList,
     RefreshControl,
     TextInput,
     Switch,
-    ScrollView
+    Modal,
+    ScrollView,
 } from "react-native";
-
-import {
-    useFocusEffect
-} from "@react-navigation/native";
-
+import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// import { BASE_URL } from "@env";
-
 const BASE_URL = "http://10.162.135.224:5001";
-export default function UpdateEvents({
-    navigation
-}) {
 
+export default function UpdateEvents({ navigation }) {
     const [events, setEvents] = useState([]);
-
     const [loading, setLoading] = useState(true);
-
     const [refreshing, setRefreshing] = useState(false);
-
+    const [updating, setUpdating] = useState(false);
     const [deletingId, setDeletingId] = useState(null);
 
-    // ==========================================
-    // EDIT STATE
-    // ==========================================
-
     const [editingEvent, setEditingEvent] = useState(null);
+    const [confirmEvent, setConfirmEvent] = useState(null);
+    const [dialog, setDialog] = useState(null);
+    const [successMessage, setSuccessMessage] = useState("");
 
     const [title, setTitle] = useState("");
     const [highlight, setHighlight] = useState("");
@@ -53,253 +39,134 @@ export default function UpdateEvents({
     const [expiresAt, setExpiresAt] = useState("");
     const [isActive, setIsActive] = useState(true);
 
-    const [updating, setUpdating] = useState(false);
+    const showMessage = (heading, message) => {
+        setDialog({ heading, message });
+    };
 
+    const expireSession = async () => {
+        await AsyncStorage.removeItem("adminToken");
 
-    // ==========================================
-    // FETCH EVENTS
-    // ==========================================
+        if (navigation) {
+            navigation.reset({
+                index: 0,
+                routes: [{ name: "Login" }],
+            });
+        }
+    };
 
-    const fetchEvents = async (
-        showLoader = true
-    ) => {
+    const toLocalDateTime = (value) => {
+        if (!value) return "";
 
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) return "";
+
+        const pad = (number) => String(number).padStart(2, "0");
+
+        return (
+            `${date.getFullYear()}-${pad(date.getMonth() + 1)}-` +
+            `${pad(date.getDate())}T${pad(date.getHours())}:` +
+            `${pad(date.getMinutes())}`
+        );
+    };
+
+    // Fetch events
+    const fetchEvents = useCallback(async (showLoader = true) => {
         try {
+            if (showLoader) setLoading(true);
 
-            if (showLoader) {
-                setLoading(true);
-            }
-
-            const token =
-                await AsyncStorage.getItem(
-                    "adminToken"
-                );
-
-
-            // ======================================
-            // CHECK TOKEN
-            // ======================================
+            const token = await AsyncStorage.getItem("adminToken");
 
             if (!token) {
-
-                Alert.alert(
-                    "Session Expired",
-                    "Please login again."
-                );
-
-                navigation.reset({
-                    index: 0,
-                    routes: [
-                        {
-                            name: "Login"
-                        }
-                    ]
-                });
-
+                await expireSession();
                 return;
             }
-
-
-            // ======================================
-            // GET EVENTS
-            // ======================================
 
             const response = await fetch(
                 `${BASE_URL}/admin/getadminupdates`,
                 {
                     method: "POST",
-
                     headers: {
-                        "Content-Type":
-                            "application/json"
+                        "Content-Type": "application/json",
                     },
-
-                    body: JSON.stringify({
-                        token: token
-                    })
+                    body: JSON.stringify({ token }),
                 }
             );
 
+            const result = await response.json();
 
-            const result =
-                await response.json();
-
-
-            console.log(
-                "Events response:",
-                result
-            );
-
+            if (response.status === 401 || response.status === 403) {
+                await expireSession();
+                return;
+            }
 
             if (!response.ok) {
-
                 throw new Error(
-                    result?.msg ||
-                    "Unable to fetch events."
+                    result?.msg || "Unable to fetch events."
                 );
             }
 
+            const list = Array.isArray(result?.data)
+                ? result.data
+                : Array.isArray(result?.updates)
+                    ? result.updates
+                    : Array.isArray(result)
+                        ? result
+                        : [];
 
-            // ======================================
-            // STORE FRESH DATA
-            // ======================================
+            list.sort((a, b) => {
+                const dateA = new Date(a?.publishedAt || 0).getTime();
+                const dateB = new Date(b?.publishedAt || 0).getTime();
+                return dateB - dateA;
+            });
 
-            const eventData =
-                Array.isArray(result?.data)
-                    ? result.data
-                    : [];
-
-
-            const sortedEvents =
-                [...eventData].sort(
-                    (a, b) => {
-
-                        const dateA =
-                            new Date(
-                                a?.publishedAt || 0
-                            ).getTime();
-
-                        const dateB =
-                            new Date(
-                                b?.publishedAt || 0
-                            ).getTime();
-
-                        return dateB - dateA;
-                    }
-                );
-
-
-            setEvents(sortedEvents);
-
+            setEvents(list);
         } catch (error) {
-
-            console.log(
-                "Fetch events error:",
-                error
-            );
-
-            Alert.alert(
+            console.error("Fetch events error:", error);
+            showMessage(
                 "Error",
-                error?.message ||
-                "Unable to fetch events."
+                error?.message || "Unable to fetch events."
             );
-
         } finally {
-
             setLoading(false);
-
             setRefreshing(false);
         }
-    };
-
-
-    // ==========================================
-    // USE FOCUS EFFECT
-    // ==========================================
+    }, [navigation]);
 
     useFocusEffect(
         useCallback(() => {
-
             fetchEvents(true);
-
-        }, [])
+        }, [fetchEvents])
     );
 
-
-    // ==========================================
-    // REFRESH
-    // ==========================================
-
     const onRefresh = async () => {
-
         setRefreshing(true);
-
         await fetchEvents(false);
     };
 
-
-    // ==========================================
-    // OPEN EDIT MODE
-    // ==========================================
-
+    // Open edit form
     const openEdit = (item) => {
-
         if (!item?._id) {
-
-            Alert.alert(
-                "Error",
-                "Event ID is missing."
-            );
-
+            showMessage("Error", "Event ID is missing.");
             return;
         }
 
-
+        setSuccessMessage("");
         setEditingEvent(item);
-
-        setTitle(item?.title || "");
-
-        setHighlight(
-            item?.highlight || ""
-        );
-
-        setEvent(
-            item?.event || ""
-        );
-
-        setInfo(
-            item?.info || ""
-        );
-
-        setUrl(
-            item?.url || ""
-        );
-
-        setImageUrl(
-            item?.imageUrl || ""
-        );
-
-        setIsActive(
-            item?.isActive !== false
-        );
-
-
-        // Convert existing expiry date
-        // to editable date-time string
-
-        if (item?.expiresAt) {
-
-            const date =
-                new Date(item.expiresAt);
-
-            if (!isNaN(date.getTime())) {
-
-                setExpiresAt(
-                    date
-                        .toISOString()
-                        .slice(0, 16)
-                );
-
-            } else {
-
-                setExpiresAt("");
-            }
-
-        } else {
-
-            setExpiresAt("");
-        }
+        setTitle(item.title || "");
+        setHighlight(item.highlight || "");
+        setEvent(item.event || "");
+        setInfo(item.info || "");
+        setUrl(item.url || "");
+        setImageUrl(item.imageUrl || "");
+        setExpiresAt(toLocalDateTime(item.expiresAt));
+        setIsActive(item.isActive !== false);
     };
 
-
-    // ==========================================
-    // CLOSE EDIT MODE
-    // ==========================================
-
     const closeEdit = () => {
+        if (updating) return;
 
         setEditingEvent(null);
-
         setTitle("");
         setHighlight("");
         setEvent("");
@@ -310,1413 +177,803 @@ export default function UpdateEvents({
         setIsActive(true);
     };
 
-
-    // ==========================================
-    // UPDATE EVENT
-    // ==========================================
-
+    // Update event
     const updateEvent = async () => {
+        if (updating) return;
+
+        if (!editingEvent?._id) {
+            showMessage("Error", "Event ID is missing.");
+            return;
+        }
+
+        if (!title.trim()) {
+            showMessage("Validation", "Event title is required.");
+            return;
+        }
+
+        let expiryDate = null;
+
+        if (expiresAt.trim()) {
+            const parsedDate = new Date(expiresAt);
+
+            if (Number.isNaN(parsedDate.getTime())) {
+                showMessage(
+                    "Invalid date",
+                    "Enter a valid expiry date and time."
+                );
+                return;
+            }
+
+            expiryDate = parsedDate.toISOString();
+        }
+
+        setUpdating(true);
+        setSuccessMessage("");
 
         try {
-
-            if (!editingEvent?._id) {
-
-                Alert.alert(
-                    "Error",
-                    "Event ID is missing."
-                );
-
-                return;
-            }
-
-
-            if (!title.trim()) {
-
-                Alert.alert(
-                    "Validation",
-                    "Event title is required."
-                );
-
-                return;
-            }
-
-
-            const token =
-                await AsyncStorage.getItem(
-                    "adminToken"
-                );
-
+            const token = await AsyncStorage.getItem("adminToken");
 
             if (!token) {
-
-                Alert.alert(
-                    "Session Expired",
-                    "Please login again."
-                );
-
-                navigation.reset({
-                    index: 0,
-                    routes: [
-                        {
-                            name: "Login"
-                        }
-                    ]
-                });
-
+                await expireSession();
                 return;
             }
 
-
-            setUpdating(true);
-
-
-            // ======================================
-            // UPDATE BODY
-            // ======================================
-
-            const body = {
-
-                token: token,
-
+            const payload = {
+                token,
                 id: editingEvent._id,
-
                 title: title.trim(),
-
-                highlight:
-                    highlight.trim(),
-
-                event:
-                    event.trim(),
-
-                info:
-                    info.trim(),
-
-                url:
-                    url.trim(),
-
-                imageUrl:
-                    imageUrl.trim(),
-
-                isActive:
-                    isActive,
-
-                expiresAt:
-                    expiresAt.trim()
-                        ? expiresAt.trim()
-                        : null
+                highlight: highlight.trim(),
+                event: event.trim(),
+                info: info.trim(),
+                url: url.trim(),
+                imageUrl: imageUrl.trim(),
+                isActive,
+                expiresAt: expiryDate,
             };
-
-
-            console.log(
-                "Update event body:",
-                body
-            );
-
-
-            // ======================================
-            // UPDATE API
-            // ======================================
 
             const response = await fetch(
                 `${BASE_URL}/admin/updateadminupdate`,
                 {
                     method: "POST",
-
                     headers: {
-                        "Content-Type":
-                            "application/json"
+                        "Content-Type": "application/json",
                     },
-
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(payload),
                 }
             );
 
+            const result = await response.json();
 
-            const result =
-                await response.json();
-
-
-            console.log(
-                "Update event response:",
-                result
-            );
-
+            if (response.status === 401 || response.status === 403) {
+                await expireSession();
+                return;
+            }
 
             if (!response.ok) {
-
                 throw new Error(
-                    result?.msg ||
-                    "Unable to update event."
+                    result?.msg || "Unable to update event."
                 );
             }
 
-
-            // ======================================
-            // SUCCESS
-            // ======================================
-
-            Alert.alert(
-                "Success",
-                "Event updated successfully."
-            );
-
-
-            // ======================================
-            // CLOSE EDIT MODE
-            // ======================================
-
-            closeEdit();
-
-
-            // ======================================
-            // FETCH FRESH DATA
-            // ======================================
-
+            setEditingEvent(null);
+            setSuccessMessage("Event updated successfully!");
             await fetchEvents(false);
-
         } catch (error) {
-
-            console.log(
-                "Update event error:",
-                error
-            );
-
-            Alert.alert(
+            console.error("Update event error:", error);
+            showMessage(
                 "Error",
-                error?.message ||
-                "Unable to update event."
+                error?.message || "Unable to update event."
             );
-
         } finally {
-
             setUpdating(false);
         }
     };
 
+    // Deactivate event
+    const deactivateEvent = async () => {
+        const item = confirmEvent;
 
-    // ==========================================
-    // DEACTIVATE EVENT
-    // ==========================================
+        if (!item?._id || deletingId !== null) return;
 
-    const deactivateEvent = async (
-        eventId
-    ) => {
+        setConfirmEvent(null);
+        setDeletingId(String(item._id));
+        setSuccessMessage("");
 
         try {
-
-            const token =
-                await AsyncStorage.getItem(
-                    "adminToken"
-                );
-
+            const token = await AsyncStorage.getItem("adminToken");
 
             if (!token) {
-
-                Alert.alert(
-                    "Session Expired",
-                    "Please login again."
-                );
-
-                navigation.reset({
-                    index: 0,
-                    routes: [
-                        {
-                            name: "Login"
-                        }
-                    ]
-                });
-
+                await expireSession();
                 return;
             }
-
-
-            if (!eventId) {
-
-                Alert.alert(
-                    "Error",
-                    "Event ID is missing."
-                );
-
-                return;
-            }
-
-
-            setDeletingId(eventId);
-
 
             const response = await fetch(
                 `${BASE_URL}/admin/deleteadminupdate`,
                 {
                     method: "POST",
-
                     headers: {
-                        "Content-Type":
-                            "application/json"
+                        "Content-Type": "application/json",
                     },
-
                     body: JSON.stringify({
-                        token: token,
-                        id: eventId
-                    })
+                        token,
+                        id: item._id,
+                    }),
                 }
             );
 
+            const result = await response.json();
 
-            const result =
-                await response.json();
-
-
-            console.log(
-                "Delete event response:",
-                result
-            );
-
+            if (response.status === 401 || response.status === 403) {
+                await expireSession();
+                return;
+            }
 
             if (!response.ok) {
-
                 throw new Error(
-                    result?.msg ||
-                    "Unable to deactivate event."
+                    result?.msg || "Unable to deactivate event."
                 );
             }
 
-
-            Alert.alert(
-                "Success",
-                "Event deactivated successfully."
-            );
-
-
+            setSuccessMessage("Event deactivated successfully!");
             await fetchEvents(false);
-
         } catch (error) {
-
-            console.log(
-                "Delete event error:",
-                error
-            );
-
-            Alert.alert(
+            console.error("Deactivate event error:", error);
+            showMessage(
                 "Error",
-                error?.message ||
-                "Unable to deactivate event."
+                error?.message || "Unable to deactivate event."
             );
-
         } finally {
-
             setDeletingId(null);
         }
     };
 
+    const renderField = (
+        label,
+        value,
+        setter,
+        placeholder,
+        multiline = false,
+        extraProps = {}
+    ) => (
+        <View style={styles.fieldContainer}>
+            <Text style={styles.label}>{label}</Text>
 
-    // ==========================================
-    // CONFIRM DEACTIVATION
-    // ==========================================
+            <TextInput
+                style={[
+                    styles.input,
+                    multiline && styles.multilineInput,
+                ]}
+                value={value}
+                onChangeText={setter}
+                placeholder={placeholder}
+                placeholderTextColor="#94a3b8"
+                multiline={multiline}
+                textAlignVertical={multiline ? "top" : "center"}
+                editable={!updating}
+                {...extraProps}
+            />
+        </View>
+    );
 
-    const confirmDeactivate = (
-        item
-    ) => {
-
-        Alert.alert(
-            "Deactivate Event",
-
-            `Are you sure you want to deactivate "${item?.title || "this event"}"?`,
-
-            [
-                {
-                    text: "Cancel",
-                    style: "cancel"
-                },
-
-                {
-                    text: "Deactivate",
-                    style: "destructive",
-
-                    onPress: () =>
-                        deactivateEvent(
-                            item?._id
-                        )
-                }
-            ]
-        );
-    };
-
-
-    // ==========================================
-    // EDIT FORM
-    // ==========================================
-
-    const renderEditForm = () => {
-
-        if (!editingEvent) {
-            return null;
-        }
-
+    const renderItem = ({ item }) => {
+        const active = item?.isActive !== false;
+        const deleting = deletingId === String(item?._id);
 
         return (
-
-            <View style={styles.editContainer}>
-
-                {/* HEADER */}
-
-                <View style={styles.editHeader}>
-
-                    <View>
-
-                        <Text
-                            style={
-                                styles.editHeading
-                            }
-                        >
-                            Edit Event
+            <View style={styles.eventCard}>
+                <View style={styles.cardHeader}>
+                    <View style={styles.cardTitleContainer}>
+                        <Text style={styles.eventTitle}>
+                            {item?.title || "Untitled event"}
                         </Text>
 
-                        <Text
-                            style={
-                                styles.editSubheading
-                            }
-                        >
-                            Update event details
-                        </Text>
-
-                    </View>
-
-
-                    <TouchableOpacity
-                        onPress={closeEdit}
-                        disabled={updating}
-                    >
-
-                        <Text
-                            style={
-                                styles.cancelText
-                            }
-                        >
-                            Cancel
-                        </Text>
-
-                    </TouchableOpacity>
-
-                </View>
-
-
-                {/* TITLE */}
-
-                <Text style={styles.label}>
-                    Title *
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={title}
-                    onChangeText={setTitle}
-                    placeholder="Enter event title"
-                    placeholderTextColor="#999"
-                    editable={!updating}
-                />
-
-
-                {/* HIGHLIGHT */}
-
-                <Text style={styles.label}>
-                    Highlight
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={highlight}
-                    onChangeText={setHighlight}
-                    placeholder="Enter highlight"
-                    placeholderTextColor="#999"
-                    editable={!updating}
-                />
-
-
-                {/* EVENT */}
-
-                <Text style={styles.label}>
-                    Event
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={event}
-                    onChangeText={setEvent}
-                    placeholder="Enter event name"
-                    placeholderTextColor="#999"
-                    editable={!updating}
-                />
-
-
-                {/* INFORMATION */}
-
-                <Text style={styles.label}>
-                    Information
-                </Text>
-
-                <TextInput
-                    style={[
-                        styles.input,
-                        styles.multilineInput
-                    ]}
-                    value={info}
-                    onChangeText={setInfo}
-                    placeholder="Enter event information"
-                    placeholderTextColor="#999"
-                    multiline
-                    textAlignVertical="top"
-                    editable={!updating}
-                />
-
-
-                {/* EVENT URL */}
-
-                <Text style={styles.label}>
-                    Event URL
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={url}
-                    onChangeText={setUrl}
-                    placeholder="Enter event URL"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    editable={!updating}
-                />
-
-
-                {/* IMAGE URL */}
-
-                <Text style={styles.label}>
-                    Image URL
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={imageUrl}
-                    onChangeText={setImageUrl}
-                    placeholder="Enter image URL"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    keyboardType="url"
-                    editable={!updating}
-                />
-
-
-                {/* EXPIRY */}
-
-                <Text style={styles.label}>
-                    Expiry Date & Time
-                </Text>
-
-                <TextInput
-                    style={styles.input}
-                    value={expiresAt}
-                    onChangeText={setExpiresAt}
-                    placeholder="YYYY-MM-DDTHH:MM"
-                    placeholderTextColor="#999"
-                    editable={!updating}
-                />
-
-
-                {/* ACTIVE */}
-
-                <View
-                    style={
-                        styles.switchContainer
-                    }
-                >
-
-                    <View>
-
-                        <Text
-                            style={
-                                styles.switchTitle
-                            }
-                        >
-                            Event Active
-                        </Text>
-
-                        <Text
-                            style={
-                                styles.switchSubtitle
-                            }
-                        >
-                            Allow this event to
-                            remain visible
-                        </Text>
-
-                    </View>
-
-
-                    <Switch
-                        value={isActive}
-                        onValueChange={
-                            setIsActive
-                        }
-                        disabled={updating}
-                    />
-
-                </View>
-
-
-                {/* UPDATE BUTTON */}
-
-                <TouchableOpacity
-                    style={
-                        styles.updateButton
-                    }
-                    onPress={updateEvent}
-                    disabled={updating}
-                >
-
-                    {updating ? (
-
-                        <ActivityIndicator
-                            color="#FFFFFF"
-                        />
-
-                    ) : (
-
-                        <Text
-                            style={
-                                styles.updateButtonText
-                            }
-                        >
-                            Update Event
-                        </Text>
-
-                    )}
-
-                </TouchableOpacity>
-
-            </View>
-        );
-    };
-
-
-    // ==========================================
-    // RENDER EVENT
-    // ==========================================
-
-    const renderEvent = ({
-        item
-    }) => {
-
-        const isDeleting =
-            deletingId === item?._id;
-
-
-        // ======================================
-        // CURRENT EVENT IS BEING EDITED
-        // ======================================
-
-        if (
-            editingEvent?._id === item?._id
-        ) {
-
-            return (
-                <View style={styles.card}>
-                    {renderEditForm()}
-                </View>
-            );
-        }
-
-
-        return (
-
-            <View style={styles.card}>
-
-                {/* EVENT HEADER */}
-
-                <View
-                    style={
-                        styles.eventHeader
-                    }
-                >
-
-                    <View
-                        style={
-                            styles.titleContainer
-                        }
-                    >
-
-                        <Text
-                            style={
-                                styles.eventTitle
-                            }
-                        >
-                            {item?.title ||
-                                "Untitled Event"}
-                        </Text>
-
-
-                        {item?.highlight ? (
-
-                            <Text
-                                style={
-                                    styles.highlight
-                                }
-                            >
+                        {!!item?.highlight && (
+                            <Text style={styles.highlight}>
                                 {item.highlight}
                             </Text>
-
-                        ) : null}
-
+                        )}
                     </View>
-
-
-                    {/* STATUS */}
 
                     <View
-                        style={
-                            item?.isActive
-                                ? styles.activeBadge
-                                : styles.inactiveBadge
-                        }
+                        style={[
+                            styles.badge,
+                            active ? styles.activeBadge : styles.inactiveBadge,
+                        ]}
                     >
-
                         <Text
-                            style={
-                                item?.isActive
-                                    ? styles.activeText
-                                    : styles.inactiveText
-                            }
+                            style={[
+                                styles.badgeText,
+                                active ? styles.activeText : styles.inactiveText,
+                            ]}
                         >
-                            {item?.isActive
-                                ? "Active"
-                                : "Inactive"}
+                            {active ? "Active" : "Inactive"}
                         </Text>
-
                     </View>
-
                 </View>
 
-
-                {/* EVENT */}
-
-                {item?.event ? (
-
-                    <Text
-                        style={
-                            styles.eventName
-                        }
-                    >
-                        Event: {item.event}
-                    </Text>
-
-                ) : null}
-
-
-                {/* INFORMATION */}
-
-                {item?.info ? (
-
-                    <Text
-                        style={
-                            styles.info
-                        }
-                        numberOfLines={4}
-                    >
-                        {item.info}
-                    </Text>
-
-                ) : null}
-
-
-                {/* EXPIRY */}
-
-                {item?.expiresAt ? (
-
-                    <Text
-                        style={
-                            styles.expiry
-                        }
-                    >
-                        Expires:{" "}
-                        {new Date(
-                            item.expiresAt
-                        ).toLocaleString()}
-                    </Text>
-
-                ) : (
-
-                    <Text
-                        style={
-                            styles.expiry
-                        }
-                    >
-                        No expiry date
-                    </Text>
-
+                {!!item?.event && (
+                    <Text style={styles.description}>{item.event}</Text>
                 )}
 
-
-                {/* PUBLISHED */}
-
-                {item?.publishedAt ? (
-
-                    <Text
-                        style={
-                            styles.date
-                        }
-                    >
-                        Published:{" "}
-                        {new Date(
-                            item.publishedAt
-                        ).toLocaleString()}
+                {!!item?.info && (
+                    <Text style={styles.info} numberOfLines={4}>
+                        {item.info}
                     </Text>
+                )}
 
-                ) : null}
+                {!!item?.expiresAt && (
+                    <Text style={styles.dateText}>
+                        Expires: {toLocalDateTime(item.expiresAt).replace("T", " ")}
+                    </Text>
+                )}
 
-
-                {/* ACTIONS */}
-
-                <View
-                    style={
-                        styles.actions
-                    }
-                >
-
-                    {/* EDIT */}
-
+                <View style={styles.cardActions}>
                     <TouchableOpacity
-                        style={
-                            styles.editButton
-                        }
-                        onPress={() =>
-                            openEdit(item)
-                        }
-                        disabled={
-                            isDeleting ||
-                            updating
-                        }
+                        style={[styles.button, styles.editButton]}
+                        onPress={() => openEdit(item)}
+                        disabled={deletingId !== null}
                     >
-
-                        <Text
-                            style={
-                                styles.editText
-                            }
-                        >
-                            Edit
-                        </Text>
-
+                        <Text style={styles.buttonText}>Edit</Text>
                     </TouchableOpacity>
 
-
-                    {/* DEACTIVATE */}
-
-                    {item?.isActive && (
-
+                    {active && (
                         <TouchableOpacity
-                            style={
-                                styles.deleteButton
-                            }
-                            onPress={() =>
-                                confirmDeactivate(
-                                    item
-                                )
-                            }
-                            disabled={
-                                isDeleting ||
-                                updating
-                            }
+                            style={[styles.button, styles.deleteButton]}
+                            onPress={() => setConfirmEvent(item)}
+                            disabled={deletingId !== null}
                         >
-
-                            {isDeleting ? (
-
-                                <ActivityIndicator
-                                    size="small"
-                                    color="#FFFFFF"
-                                />
-
+                            {deleting ? (
+                                <ActivityIndicator color="#fff" size="small" />
                             ) : (
-
-                                <Text
-                                    style={
-                                        styles.deleteText
-                                    }
-                                >
+                                <Text style={styles.buttonText}>
                                     Deactivate
                                 </Text>
-
                             )}
-
                         </TouchableOpacity>
-
                     )}
-
                 </View>
-
             </View>
         );
     };
 
-
-    // ==========================================
-    // LOADING
-    // ==========================================
-
-    if (
-        loading &&
-        events.length === 0
-    ) {
-
-        return (
-
-            <View
-                style={
-                    styles.loadingContainer
-                }
-            >
-
-                <ActivityIndicator
-                    size="large"
-                />
-
-                <Text
-                    style={
-                        styles.loadingText
-                    }
-                >
-                    Loading events...
-                </Text>
-
-            </View>
-        );
-    }
-
-
-    // ==========================================
-    // MAIN UI
-    // ==========================================
-
     return (
-
-        <View style={styles.container}>
-
-            {/* HEADER */}
-
+        <View style={styles.screen}>
             <View style={styles.header}>
-
-                <View>
-
-                    <Text
-                        style={
-                            styles.title
-                        }
-                    >
-                        Update Events
+                <View style={styles.headerText}>
+                    <Text style={styles.heading}>Update Events</Text>
+                    <Text style={styles.subtitle}>
+                        Manage and update published events
                     </Text>
-
-                    <Text
-                        style={
-                            styles.subtitle
-                        }
-                    >
-                        {events.length} event
-                        {events.length !== 1
-                            ? "s"
-                            : ""}
-                    </Text>
-
                 </View>
 
-
                 <TouchableOpacity
-                    onPress={() => {
-
-                        if (editingEvent) {
-                            closeEdit();
-                        } else {
-                            navigation.goBack();
-                        }
-
-                    }}
-                    disabled={updating}
+                    style={styles.refreshButton}
+                    onPress={onRefresh}
+                    disabled={refreshing || loading}
                 >
-
-                    <Text
-                        style={
-                            styles.backText
-                        }
-                    >
-                        {editingEvent
-                            ? "Cancel"
-                            : "Back"}
-                    </Text>
-
+                    <Text style={styles.refreshText}>Refresh</Text>
                 </TouchableOpacity>
-
             </View>
 
-
-            {/* EVENT LIST */}
-
-            <FlatList
-
-                data={events}
-
-                keyExtractor={item =>
-                    String(item?._id)
-                }
-
-                renderItem={
-                    renderEvent
-                }
-
-                showsVerticalScrollIndicator={
-                    false
-                }
-
-                refreshControl={
-
-                    <RefreshControl
-                        refreshing={
-                            refreshing
-                        }
-                        onRefresh={
-                            onRefresh
-                        }
-                    />
-
-                }
-
-                contentContainerStyle={
-                    events.length === 0
-                        ? styles.emptyContainer
-                        : styles.listContainer
-                }
-
-                ListEmptyComponent={
-
-                    <View
-                        style={
-                            styles.emptyView
-                        }
+            {!!successMessage && (
+                <View style={styles.successBox}>
+                    <Text
+                        style={styles.successText}
+                        accessibilityLiveRegion="polite"
                     >
+                        {successMessage}
+                    </Text>
+                </View>
+            )}
 
-                        <Text
-                            style={
-                                styles.emptyIcon
-                            }
+            {loading ? (
+                <View style={styles.center}>
+                    <ActivityIndicator size="large" color="#2563eb" />
+                    <Text style={styles.loadingText}>Loading events...</Text>
+                </View>
+            ) : (
+                <FlatList
+                    data={events}
+                    keyExtractor={(item, index) =>
+                        String(item?._id || index)
+                    }
+                    renderItem={renderItem}
+                    contentContainerStyle={styles.list}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                        />
+                    }
+                    ListEmptyComponent={
+                        <View style={styles.empty}>
+                            <Text style={styles.emptyTitle}>
+                                No events found
+                            </Text>
+                            <Text style={styles.emptyText}>
+                                Events will appear here when available.
+                            </Text>
+                        </View>
+                    }
+                />
+            )}
+
+            {/* Edit modal */}
+            <Modal
+                visible={!!editingEvent}
+                transparent
+                animationType="fade"
+                onRequestClose={closeEdit}
+            >
+                <View style={styles.overlay}>
+                    <View style={styles.editModal}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Edit Event</Text>
+
+                            <TouchableOpacity
+                                onPress={closeEdit}
+                                disabled={updating}
+                            >
+                                <Text style={styles.closeText}>Close</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            style={styles.formScroll}
+                            contentContainerStyle={styles.formContent}
+                            keyboardShouldPersistTaps="handled"
                         >
-                            📢
-                        </Text>
+                            {renderField("Title *", title, setTitle, "Event title")}
+                            {renderField("Highlight", highlight, setHighlight, "Highlight")}
+                            {renderField("Event", event, setEvent, "Event name")}
+                            {renderField("Information", info, setInfo, "Event information", true)}
+                            {renderField(
+                                "Event URL",
+                                url,
+                                setUrl,
+                                "https://example.com",
+                                false,
+                                { autoCapitalize: "none", keyboardType: "url" }
+                            )}
+                            {renderField(
+                                "Image URL",
+                                imageUrl,
+                                setImageUrl,
+                                "Image URL",
+                                false,
+                                { autoCapitalize: "none", keyboardType: "url" }
+                            )}
+                            {renderField(
+                                "Expiry date and time",
+                                expiresAt,
+                                setExpiresAt,
+                                "YYYY-MM-DDTHH:mm",
+                                false,
+                                { autoCapitalize: "none" }
+                            )}
 
-                        <Text
-                            style={
-                                styles.emptyTitle
-                            }
-                        >
-                            No events found
-                        </Text>
+                            <Text style={styles.dateHint}>
+                                Example: 2026-12-31T23:59
+                            </Text>
 
-                        <Text
-                            style={
-                                styles.emptySubtitle
-                            }
-                        >
-                            Create a new event from
-                            the Add Event page.
-                        </Text>
+                            <View style={styles.switchRow}>
+                                <View style={styles.switchCopy}>
+                                    <Text style={styles.label}>Event status</Text>
+                                    <Text style={styles.switchDescription}>
+                                        {isActive ? "Active" : "Inactive"}
+                                    </Text>
+                                </View>
 
+                                <Switch
+                                    value={isActive}
+                                    onValueChange={setIsActive}
+                                    disabled={updating}
+                                />
+                            </View>
+
+                            <View style={styles.formActions}>
+                                <TouchableOpacity
+                                    style={[styles.button, styles.cancelButton]}
+                                    onPress={closeEdit}
+                                    disabled={updating}
+                                >
+                                    <Text style={styles.cancelText}>Cancel</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.button,
+                                        styles.saveButton,
+                                        updating && styles.disabledButton,
+                                    ]}
+                                    onPress={updateEvent}
+                                    disabled={updating}
+                                >
+                                    {updating ? (
+                                        <ActivityIndicator color="#fff" size="small" />
+                                    ) : (
+                                        <Text style={styles.buttonText}>
+                                            Save Changes
+                                        </Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
                     </View>
+                </View>
+            </Modal>
 
-                }
+            {/* Deactivation confirmation */}
+            <Modal
+                visible={!!confirmEvent}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setConfirmEvent(null)}
+            >
+                <View style={styles.overlay}>
+                    <View style={styles.confirmModal}>
+                        <Text style={styles.modalTitle}>
+                            Deactivate Event?
+                        </Text>
 
-            />
+                        <Text style={styles.confirmMessage}>
+                            Are you sure you want to deactivate{" "}
+                            {confirmEvent?.title || "this event"}?
+                        </Text>
 
+                        <View style={styles.formActions}>
+                            <TouchableOpacity
+                                style={[styles.button, styles.cancelButton]}
+                                onPress={() => setConfirmEvent(null)}
+                            >
+                                <Text style={styles.cancelText}>Cancel</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.button, styles.deleteButton]}
+                                onPress={deactivateEvent}
+                            >
+                                <Text style={styles.buttonText}>Confirm</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Message dialog */}
+            <Modal
+                visible={!!dialog}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setDialog(null)}
+            >
+                <View style={styles.overlay}>
+                    <View style={styles.confirmModal}>
+                        <Text style={styles.modalTitle}>
+                            {dialog?.heading || "Message"}
+                        </Text>
+
+                        <Text style={styles.confirmMessage}>
+                            {dialog?.message || ""}
+                        </Text>
+
+                        <TouchableOpacity
+                            style={[styles.button, styles.saveButton, styles.okButton]}
+                            onPress={() => setDialog(null)}
+                        >
+                            <Text style={styles.buttonText}>OK</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
 
-
 const styles = StyleSheet.create({
-
-    // ==========================================
-    // CONTAINER
-    // ==========================================
-
-    container: {
+    screen: {
         flex: 1,
-        backgroundColor: "#FFF8F0",
-        paddingHorizontal: 20,
-        paddingTop: 20
+        backgroundColor: "#f1f5f9",
     },
-
-
-    loadingContainer: {
-        flex: 1,
-        backgroundColor: "#FFF8F0",
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-
-    loadingText: {
-        marginTop: 10,
-        color: "#777",
-        fontSize: 14
-    },
-
-
-    // ==========================================
-    // HEADER
-    // ==========================================
-
     header: {
+        backgroundColor: "#fff",
+        paddingHorizontal: 18,
+        paddingVertical: 18,
+        borderBottomWidth: 1,
+        borderBottomColor: "#e2e8f0",
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 20
+        justifyContent: "space-between",
     },
-
-
-    title: {
-        fontSize: 25,
-        fontWeight: "800",
-        color: "#292929"
+    headerText: {
+        flex: 1,
+        marginRight: 10,
     },
-
-
+    heading: {
+        fontSize: 23,
+        fontWeight: "700",
+        color: "#0f172a",
+    },
     subtitle: {
         fontSize: 13,
-        color: "#777",
-        marginTop: 4
+        color: "#64748b",
+        marginTop: 4,
     },
-
-
-    backText: {
-        color: "#B64216",
-        fontSize: 14,
-        fontWeight: "700"
-    },
-
-
-    // ==========================================
-    // LIST
-    // ==========================================
-
-    listContainer: {
-        paddingBottom: 30
-    },
-
-
-    emptyContainer: {
-        flexGrow: 1,
-        justifyContent: "center"
-    },
-
-
-    // ==========================================
-    // CARD
-    // ==========================================
-
-    card: {
-        backgroundColor: "#FFFFFF",
-        borderRadius: 18,
-        padding: 17,
-        marginBottom: 14,
-
-        elevation: 3,
-
-        shadowColor: "#000",
-
-        shadowOffset: {
-            width: 0,
-            height: 3
-        },
-
-        shadowOpacity: 0.05,
-
-        shadowRadius: 8
-    },
-
-
-    // ==========================================
-    // EVENT HEADER
-    // ==========================================
-
-    eventHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "flex-start"
-    },
-
-
-    titleContainer: {
-        flex: 1,
-        paddingRight: 10
-    },
-
-
-    eventTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-
-    highlight: {
-        fontSize: 13,
-        color: "#B64216",
-        fontWeight: "700",
-        marginTop: 5
-    },
-
-
-    // ==========================================
-    // STATUS
-    // ==========================================
-
-    activeBadge: {
-        backgroundColor: "#E8F7EC",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8
-    },
-
-
-    inactiveBadge: {
-        backgroundColor: "#F1F1F1",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8
-    },
-
-
-    activeText: {
-        color: "#218838",
-        fontSize: 11,
-        fontWeight: "800"
-    },
-
-
-    inactiveText: {
-        color: "#777",
-        fontSize: 11,
-        fontWeight: "800"
-    },
-
-
-    // ==========================================
-    // CONTENT
-    // ==========================================
-
-    eventName: {
-        fontSize: 14,
-        color: "#444",
-        fontWeight: "700",
-        marginTop: 13
-    },
-
-
-    info: {
-        fontSize: 13,
-        lineHeight: 20,
-        color: "#666",
-        marginTop: 8
-    },
-
-
-    expiry: {
-        fontSize: 12,
-        color: "#B64216",
-        marginTop: 10
-    },
-
-
-    date: {
-        fontSize: 11,
-        color: "#999",
-        marginTop: 5
-    },
-
-
-    // ==========================================
-    // ACTIONS
-    // ==========================================
-
-    actions: {
-        flexDirection: "row",
-        gap: 10,
-        marginTop: 16
-    },
-
-
-    editButton: {
-        flex: 1,
-        height: 45,
-        borderRadius: 11,
-        backgroundColor: "#F3E8E1",
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-
-    editText: {
-        color: "#B64216",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-
-    deleteButton: {
-        flex: 1,
-        height: 45,
-        borderRadius: 11,
-        backgroundColor: "#C0392B",
-        justifyContent: "center",
-        alignItems: "center"
-    },
-
-
-    deleteText: {
-        color: "#FFFFFF",
-        fontSize: 14,
-        fontWeight: "800"
-    },
-
-
-    // ==========================================
-    // EDIT FORM
-    // ==========================================
-
-    editContainer: {
-        width: "100%"
-    },
-
-
-    editHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: 18
-    },
-
-
-    editHeading: {
-        fontSize: 21,
-        fontWeight: "800",
-        color: "#292929"
-    },
-
-
-    editSubheading: {
-        fontSize: 12,
-        color: "#888",
-        marginTop: 3
-    },
-
-
-    cancelText: {
-        color: "#B64216",
-        fontWeight: "700",
-        fontSize: 14
-    },
-
-
-    label: {
-        fontSize: 13,
-        fontWeight: "700",
-        color: "#444",
-        marginBottom: 6,
-        marginTop: 10
-    },
-
-
-    input: {
-        minHeight: 45,
-        borderWidth: 1,
-        borderColor: "#E1D7D0",
-        borderRadius: 11,
-        backgroundColor: "#FFFDFC",
-        paddingHorizontal: 13,
+    refreshButton: {
+        backgroundColor: "#2563eb",
         paddingVertical: 10,
-        fontSize: 14,
-        color: "#292929"
+        paddingHorizontal: 14,
+        borderRadius: 8,
     },
-
-
-    multilineInput: {
-        minHeight: 100,
-        textAlignVertical: "top"
+    refreshText: {
+        color: "#fff",
+        fontWeight: "600",
+        fontSize: 13,
     },
-
-
-    switchContainer: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginTop: 18,
-        paddingVertical: 12,
-        paddingHorizontal: 4
+    list: {
+        padding: 16,
+        paddingBottom: 32,
+        flexGrow: 1,
     },
-
-
-    switchTitle: {
-        fontSize: 14,
-        fontWeight: "700",
-        color: "#333"
-    },
-
-
-    switchSubtitle: {
-        fontSize: 11,
-        color: "#888",
-        marginTop: 3,
-        maxWidth: 220
-    },
-
-
-    updateButton: {
-        height: 48,
-        borderRadius: 11,
-        backgroundColor: "#B64216",
+    center: {
+        flex: 1,
         justifyContent: "center",
         alignItems: "center",
-        marginTop: 14
+        padding: 24,
     },
-
-
-    updateButtonText: {
-        color: "#FFFFFF",
-        fontSize: 15,
-        fontWeight: "800"
+    loadingText: {
+        color: "#64748b",
+        marginTop: 12,
     },
-
-
-    // ==========================================
-    // EMPTY
-    // ==========================================
-
-    emptyView: {
+    empty: {
         alignItems: "center",
-        paddingHorizontal: 20
+        paddingVertical: 60,
     },
-
-
-    emptyIcon: {
-        fontSize: 45,
-        marginBottom: 12
-    },
-
-
     emptyTitle: {
         fontSize: 18,
-        fontWeight: "800",
-        color: "#292929"
+        fontWeight: "700",
+        color: "#334155",
     },
-
-
-    emptySubtitle: {
+    emptyText: {
+        color: "#64748b",
+        marginTop: 8,
+        textAlign: "center",
+    },
+    eventCard: {
+        backgroundColor: "#fff",
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: "#e2e8f0",
+        elevation: 2,
+    },
+    cardHeader: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+    },
+    cardTitleContainer: {
+        flex: 1,
+        marginRight: 10,
+    },
+    eventTitle: {
+        fontSize: 17,
+        fontWeight: "700",
+        color: "#0f172a",
+    },
+    highlight: {
         fontSize: 13,
-        color: "#888",
-        marginTop: 6,
-        textAlign: "center"
-    }
-
+        color: "#2563eb",
+        marginTop: 5,
+    },
+    badge: {
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 20,
+    },
+    activeBadge: {
+        backgroundColor: "#dcfce7",
+    },
+    inactiveBadge: {
+        backgroundColor: "#fee2e2",
+    },
+    badgeText: {
+        fontSize: 11,
+        fontWeight: "700",
+    },
+    activeText: {
+        color: "#166534",
+    },
+    inactiveText: {
+        color: "#991b1b",
+    },
+    description: {
+        color: "#334155",
+        fontSize: 14,
+        marginTop: 12,
+    },
+    info: {
+        color: "#64748b",
+        fontSize: 13,
+        marginTop: 8,
+        lineHeight: 19,
+    },
+    dateText: {
+        color: "#64748b",
+        fontSize: 12,
+        marginTop: 12,
+    },
+    cardActions: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        marginTop: 16,
+    },
+    button: {
+        minHeight: 40,
+        borderRadius: 8,
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 8,
+        marginBottom: 4,
+    },
+    editButton: {
+        backgroundColor: "#2563eb",
+    },
+    deleteButton: {
+        backgroundColor: "#dc2626",
+    },
+    saveButton: {
+        backgroundColor: "#2563eb",
+    },
+    cancelButton: {
+        backgroundColor: "#e2e8f0",
+    },
+    buttonText: {
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: "600",
+    },
+    cancelText: {
+        color: "#334155",
+        fontSize: 13,
+        fontWeight: "600",
+    },
+    disabledButton: {
+        opacity: 0.6,
+    },
+    successBox: {
+        backgroundColor: "#dcfce7",
+        marginHorizontal: 16,
+        marginTop: 14,
+        padding: 12,
+        borderRadius: 8,
+    },
+    successText: {
+        color: "#166534",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    overlay: {
+        flex: 1,
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 16,
+    },
+    editModal: {
+        backgroundColor: "#fff",
+        width: "100%",
+        maxWidth: 560,
+        maxHeight: "90%",
+        borderRadius: 14,
+        overflow: "hidden",
+    },
+    modalHeader: {
+        paddingHorizontal: 18,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: "#e2e8f0",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    modalTitle: {
+        fontSize: 19,
+        fontWeight: "700",
+        color: "#0f172a",
+        flexShrink: 1,
+    },
+    closeText: {
+        color: "#2563eb",
+        fontSize: 14,
+        fontWeight: "600",
+        marginLeft: 10,
+    },
+    formScroll: {
+        flexGrow: 0,
+        flexShrink: 1,
+    },
+    formContent: {
+        padding: 18,
+        paddingBottom: 24,
+    },
+    fieldContainer: {
+        marginBottom: 14,
+    },
+    label: {
+        color: "#334155",
+        fontSize: 13,
+        fontWeight: "600",
+        marginBottom: 7,
+    },
+    input: {
+        width: "100%",
+        borderWidth: 1,
+        borderColor: "#cbd5e1",
+        backgroundColor: "#fff",
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+        fontSize: 14,
+        color: "#0f172a",
+    },
+    multilineInput: {
+        minHeight: 95,
+        paddingTop: 12,
+    },
+    dateHint: {
+        color: "#64748b",
+        fontSize: 12,
+        lineHeight: 18,
+        marginTop: -5,
+        marginBottom: 16,
+    },
+    switchRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingVertical: 12,
+        borderTopWidth: 1,
+        borderTopColor: "#e2e8f0",
+        borderBottomWidth: 1,
+        borderBottomColor: "#e2e8f0",
+        marginBottom: 18,
+    },
+    switchCopy: {
+        flex: 1,
+        marginRight: 12,
+    },
+    switchDescription: {
+        color: "#64748b",
+        fontSize: 12,
+        marginTop: 3,
+    },
+    formActions: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "flex-end",
+        marginTop: 8,
+    },
+    confirmModal: {
+        backgroundColor: "#fff",
+        width: "100%",
+        maxWidth: 420,
+        borderRadius: 14,
+        padding: 22,
+    },
+    confirmMessage: {
+        color: "#475569",
+        fontSize: 14,
+        lineHeight: 21,
+        marginTop: 12,
+        marginBottom: 14,
+    },
+    okButton: {
+        alignSelf: "flex-end",
+        minWidth: 80,
+        marginTop: 8,
+    },
 });

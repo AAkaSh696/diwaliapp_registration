@@ -1,22 +1,20 @@
-import React, { useState } from "react";
 
+import React, { useState } from "react";
 import {
     View,
     Text,
     StyleSheet,
     TextInput,
     TouchableOpacity,
-    Alert,
     ActivityIndicator,
-    ScrollView
+    ScrollView,
+    Platform,
 } from "react-native";
-
 import DateTimePicker from "@react-native-community/datetimepicker";
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
-// import { BASE_URL } from "@env";
 
-  const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "http://10.162.135.224:5001";
+
 export default function AddEvent({ navigation }) {
     const [title, setTitle] = useState("");
     const [highlight, setHighlight] = useState("");
@@ -25,355 +23,256 @@ export default function AddEvent({ navigation }) {
     const [url, setUrl] = useState("");
     const [imageUrl, setImageUrl] = useState("");
 
-    // ==========================================
-    // EXPIRY DATE
-    // ==========================================
-
     const [expiresAt, setExpiresAt] = useState(null);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
 
     const [loading, setLoading] = useState(false);
-
-
-    // ==========================================
-    // FORMAT DATE FOR DISPLAY
-    // ==========================================
+    const [successMessage, setSuccessMessage] = useState("");
+    const [errorMessage, setErrorMessage] = useState("");
 
     const formatExpiryDate = (date) => {
-
-        if (!date) {
-            return "Select expiry date & time";
-        }
+        if (!date) return "Select expiry date & time";
 
         return date.toLocaleString([], {
             year: "numeric",
             month: "short",
             day: "2-digit",
             hour: "2-digit",
-            minute: "2-digit"
+            minute: "2-digit",
         });
     };
 
-
-    // ==========================================
-    // DATE SELECTED
-    // ==========================================
-
-    const handleDateChange = (event, selectedDate) => {
-
+    const handleDateChange = (pickerEvent, selectedDate) => {
         setShowDatePicker(false);
 
-        if (event.type === "dismissed" || !selectedDate) {
+        if (pickerEvent?.type === "dismissed" || !selectedDate) {
             return;
         }
 
         const currentDate = expiresAt || new Date();
-
         const updatedDate = new Date(selectedDate);
 
-        // Keep current selected time
-        updatedDate.setHours(
-            currentDate.getHours()
-        );
-
-        updatedDate.setMinutes(
-            currentDate.getMinutes()
-        );
-
+        updatedDate.setHours(currentDate.getHours());
+        updatedDate.setMinutes(currentDate.getMinutes());
         updatedDate.setSeconds(0);
         updatedDate.setMilliseconds(0);
 
         setExpiresAt(updatedDate);
 
-        // Open time picker after selecting date
-        setTimeout(() => {
+        // On Android, show the time picker after the date picker closes.
+        if (Platform.OS === "android") {
+            setTimeout(() => setShowTimePicker(true), 250);
+        } else {
             setShowTimePicker(true);
-        }, 300);
+        }
     };
 
-
-    // ==========================================
-    // TIME SELECTED
-    // ==========================================
-
-    const handleTimeChange = (event, selectedTime) => {
-
+    const handleTimeChange = (pickerEvent, selectedTime) => {
         setShowTimePicker(false);
 
-        if (event.type === "dismissed" || !selectedTime) {
+        if (pickerEvent?.type === "dismissed" || !selectedTime) {
             return;
         }
 
         const currentDate = expiresAt || new Date();
-
         const updatedDate = new Date(currentDate);
 
-        updatedDate.setHours(
-            selectedTime.getHours()
-        );
-
-        updatedDate.setMinutes(
-            selectedTime.getMinutes()
-        );
-
+        updatedDate.setHours(selectedTime.getHours());
+        updatedDate.setMinutes(selectedTime.getMinutes());
         updatedDate.setSeconds(0);
         updatedDate.setMilliseconds(0);
 
         setExpiresAt(updatedDate);
     };
-
-
-    // ==========================================
-    // CLEAR EXPIRY
-    // ==========================================
 
     const clearExpiry = () => {
         setExpiresAt(null);
+        setShowDatePicker(false);
+        setShowTimePicker(false);
     };
 
+    const resetForm = () => {
+        setTitle("");
+        setHighlight("");
+        setEvent("");
+        setInfo("");
+        setUrl("");
+        setImageUrl("");
+        setExpiresAt(null);
+        setShowDatePicker(false);
+        setShowTimePicker(false);
+    };
 
-    // ==========================================
-    // ADD EVENT
-    // ==========================================
+    const goBack = () => {
+        if (navigation?.canGoBack?.()) {
+            navigation.goBack();
+        } else {
+            navigation?.navigate?.("AdminDashboard");
+        }
+    };
 
     const addEvent = async () => {
+        if (loading) return;
+
+        setSuccessMessage("");
+        setErrorMessage("");
+
+        if (!title.trim()) {
+            setErrorMessage("Please enter an event title.");
+            return;
+        }
+
+        if (expiresAt && expiresAt.getTime() <= Date.now()) {
+            setErrorMessage(
+                "Expiry date and time must be in the future."
+            );
+            return;
+        }
+
+        setLoading(true);
 
         try {
-
-            // ======================================
-            // TITLE VALIDATION
-            // ======================================
-
-            if (!title.trim()) {
-
-                Alert.alert(
-                    "Required",
-                    "Please enter an event title."
-                );
-
-                return;
-            }
-
-
-            // ======================================
-            // GET ADMIN TOKEN
-            // ======================================
-
-            const token =
-                await AsyncStorage.getItem(
-                    "adminToken"
-                );
-
+            const token = await AsyncStorage.getItem("adminToken");
 
             if (!token) {
+                setErrorMessage("Your session has expired. Please log in again.");
 
-                Alert.alert(
-                    "Session Expired",
-                    "Please login again."
-                );
-
-                navigation.reset({
-                    index: 0,
-                    routes: [
-                        {
-                            name: "Login"
-                        }
-                    ]
-                });
-
+                if (navigation?.reset) {
+                    navigation.reset({
+                        index: 0,
+                        routes: [{ name: "Login" }],
+                    });
+                }
                 return;
             }
 
-
-            // ======================================
-            // VALIDATE EXPIRY DATE
-            // ======================================
-
-            if (expiresAt) {
-
-                if (expiresAt <= new Date()) {
-
-                    Alert.alert(
-                        "Invalid Expiry",
-                        "Expiry date and time must be in the future."
-                    );
-
-                    return;
-                }
-            }
-
-
-            setLoading(true);
-
-
-            // ======================================
-            // REQUEST BODY
-            // ======================================
-
             const body = {
-
-                token: token,
-
+                token,
                 title: title.trim(),
-
                 highlight: highlight.trim(),
-
                 event: event.trim(),
-
                 info: info.trim(),
-
                 url: url.trim(),
-
                 imageUrl: imageUrl.trim(),
-
                 expiresAt: expiresAt
                     ? expiresAt.toISOString()
-                    : null
+                    : null,
             };
-
-
-            console.log(
-                "Adding event:",
-                body
-            );
-
-
-            // ======================================
-            // API REQUEST
-            // ======================================
 
             const response = await fetch(
                 `${BASE_URL}/admin/createupdate`,
                 {
                     method: "POST",
-
                     headers: {
-                        "Content-Type":
-                            "application/json"
+                        "Content-Type": "application/json",
                     },
-
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
                 }
             );
 
+            const result = await response.json();
 
-            const result =
-                await response.json();
-
-
-            console.log(
-                "Add event response:",
-                result
-            );
-
+            if (response.status === 401 || response.status === 403) {
+                setErrorMessage(
+                    result?.msg || "Your session has expired. Please log in again."
+                );
+                return;
+            }
 
             if (!response.ok) {
-
                 throw new Error(
-                    result?.msg ||
-                    "Unable to create event."
+                    result?.msg || "Unable to create event."
                 );
             }
 
-
-            // ======================================
-            // SUCCESS
-            // ======================================
-
-            Alert.alert(
-                "Success",
-                "Event published successfully.",
-                [
-                    {
-                        text: "OK",
-
-                        onPress: () => {
-                            navigation.goBack();
-                        }
-                    }
-                ]
-            );
-
-
+            resetForm();
+            setSuccessMessage("Event published successfully!");
         } catch (error) {
-
-            console.log(
-                "Add event error:",
-                error
-            );
-
-            Alert.alert(
-                "Error",
+            console.error("Add event error:", error);
+            setErrorMessage(
                 error?.message ||
-                "Unable to create event."
+                "Unable to connect to the server. Please try again."
             );
-
         } finally {
-
             setLoading(false);
         }
     };
 
-
     return (
-
         <View style={styles.container}>
-
-            {/* ======================================
-                HEADER
-            ====================================== */}
-
+            {/* Header */}
             <View style={styles.header}>
-
-                <View>
-
-                    <Text style={styles.title}>
-                        Add Event
-                    </Text>
-
+                <View style={styles.headerTextContainer}>
+                    <Text style={styles.title}>Add Event</Text>
                     <Text style={styles.subtitle}>
                         Publish a new event or update
                     </Text>
-
                 </View>
 
-
                 <TouchableOpacity
-                    onPress={() =>
-                        navigation.goBack()
-                    }
+                    onPress={goBack}
                     disabled={loading}
+                    style={styles.backButton}
                 >
-
-                    <Text style={styles.backText}>
-                        Back
-                    </Text>
-
+                    <Text style={styles.backText}>Back</Text>
                 </TouchableOpacity>
-
             </View>
 
+            {/* Success message: no invalid accessibilityRole */}
+            {successMessage ? (
+                <View style={styles.successAlert}>
+                    <View style={styles.successIconContainer}>
+                        <Text style={styles.successIcon}>✓</Text>
+                    </View>
 
-            {/* ======================================
-                FORM
-            ====================================== */}
+                    <View style={styles.messageContainer}>
+                        <Text style={styles.successTitle}>Success</Text>
+                        <Text
+                            style={styles.successAlertText}
+                            accessibilityLiveRegion="polite"
+                        >
+                            {successMessage}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity
+                        style={styles.closeButton}
+                        onPress={() => setSuccessMessage("")}
+                        accessibilityLabel="Dismiss success message"
+                    >
+                        <Text style={styles.closeText}>×</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : null}
+
+            {/* Error message */}
+            {errorMessage ? (
+                <View style={styles.errorAlert}>
+                    <View style={styles.messageContainer}>
+                        <Text style={styles.errorTitle}>Please check</Text>
+                        <Text style={styles.errorText}>
+                            {errorMessage}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity
+                        onPress={() => setErrorMessage("")}
+                        style={styles.closeButton}
+                        accessibilityLabel="Dismiss error message"
+                    >
+                        <Text style={styles.errorCloseText}>×</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : null}
 
             <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={
-                    styles.scrollContent
-                }
+                keyboardShouldPersistTaps="handled"
             >
-
-                {/* ==================================
-                    TITLE
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Title *
-                </Text>
-
+                <Text style={styles.label}>Title *</Text>
                 <TextInput
                     style={styles.input}
                     placeholder="Enter event title"
@@ -383,15 +282,7 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    HIGHLIGHT
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Highlight
-                </Text>
-
+                <Text style={styles.label}>Highlight</Text>
                 <TextInput
                     style={styles.input}
                     placeholder="e.g. Registration open now"
@@ -401,15 +292,7 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    EVENT
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Event
-                </Text>
-
+                <Text style={styles.label}>Event</Text>
                 <TextInput
                     style={styles.input}
                     placeholder="Enter event name"
@@ -419,20 +302,9 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    INFO
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Information
-                </Text>
-
+                <Text style={styles.label}>Information</Text>
                 <TextInput
-                    style={[
-                        styles.input,
-                        styles.textArea
-                    ]}
+                    style={[styles.input, styles.textArea]}
                     placeholder="Enter complete event information"
                     placeholderTextColor="#999"
                     value={info}
@@ -442,15 +314,7 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    URL
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Event URL
-                </Text>
-
+                <Text style={styles.label}>Event URL</Text>
                 <TextInput
                     style={styles.input}
                     placeholder="https://example.com"
@@ -462,15 +326,7 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    IMAGE URL
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Image URL
-                </Text>
-
+                <Text style={styles.label}>Image URL</Text>
                 <TextInput
                     style={styles.input}
                     placeholder="https://example.com/image.jpg"
@@ -482,304 +338,308 @@ export default function AddEvent({ navigation }) {
                     editable={!loading}
                 />
 
-
-                {/* ==================================
-                    EXPIRY
-                ================================== */}
-
-                <Text style={styles.label}>
-                    Expiry Date & Time
-                </Text>
-
+                {/* Expiry date and time */}
+                <Text style={styles.label}>Expiry Date & Time</Text>
 
                 <TouchableOpacity
                     style={styles.dateButton}
-                    onPress={() => setShowDatePicker(true)}
+                    onPress={() => {
+                        setShowTimePicker(false);
+                        setShowDatePicker(true);
+                    }}
                     disabled={loading}
                 >
-
                     <Text
                         style={[
                             styles.dateButtonText,
-                            !expiresAt &&
-                                styles.placeholderText
+                            !expiresAt && styles.placeholderText,
                         ]}
                     >
                         {formatExpiryDate(expiresAt)}
                     </Text>
-
                 </TouchableOpacity>
 
-
-                {/* DATE PICKER */}
-
                 {showDatePicker && (
-
                     <DateTimePicker
-                        value={
-                            expiresAt || new Date()
-                        }
+                        value={expiresAt || new Date()}
                         mode="date"
                         minimumDate={new Date()}
+                        display={Platform.OS === "web" ? "default" : "default"}
                         onChange={handleDateChange}
                     />
-
                 )}
 
-
-                {/* TIME PICKER */}
-
                 {showTimePicker && (
-
                     <DateTimePicker
-                        value={
-                            expiresAt || new Date()
-                        }
+                        value={expiresAt || new Date()}
                         mode="time"
                         onChange={handleTimeChange}
                     />
-
                 )}
 
-
-                {/* CLEAR BUTTON */}
-
-                {expiresAt && (
-
+                {expiresAt ? (
                     <TouchableOpacity
                         onPress={clearExpiry}
                         disabled={loading}
                         style={styles.clearButton}
                     >
-
                         <Text style={styles.clearText}>
                             Remove expiry date
                         </Text>
-
                     </TouchableOpacity>
-
-                )}
-
+                ) : null}
 
                 <Text style={styles.helperText}>
                     Optional. Select when this event should stop appearing.
                 </Text>
 
-
-                {/* ==================================
-                    PUBLISH BUTTON
-                ================================== */}
-
                 <TouchableOpacity
                     style={[
                         styles.addButton,
-                        loading &&
-                            styles.disabledButton
+                        loading && styles.disabledButton,
                     ]}
                     onPress={addEvent}
                     disabled={loading}
+                    activeOpacity={0.8}
                 >
-
                     {loading ? (
-
-                        <ActivityIndicator
-                            size="small"
-                            color="#FFFFFF"
-                        />
-
+                        <>
+                            <ActivityIndicator
+                                size="small"
+                                color="#FFFFFF"
+                            />
+                            <Text style={styles.addButtonText}>
+                                Publishing...
+                            </Text>
+                        </>
                     ) : (
-
-                        <Text
-                            style={
-                                styles.addButtonText
-                            }
-                        >
+                        <Text style={styles.addButtonText}>
                             Publish Event
                         </Text>
-
                     )}
-
                 </TouchableOpacity>
 
+                {successMessage ? (
+                    <TouchableOpacity
+                        style={styles.returnButton}
+                        onPress={goBack}
+                        activeOpacity={0.8}
+                    >
+                        <Text style={styles.returnButtonText}>
+                            Back to Events
+                        </Text>
+                    </TouchableOpacity>
+                ) : null}
 
-                <View
-                    style={
-                        styles.bottomSpace
-                    }
-                />
-
+                <View style={styles.bottomSpace} />
             </ScrollView>
-
         </View>
     );
 }
 
-
 const styles = StyleSheet.create({
-
-    // ==========================================
-    // CONTAINER
-    // ==========================================
-
     container: {
         flex: 1,
         backgroundColor: "#FFF8F0",
         paddingHorizontal: 20,
-        paddingTop: 20
+        paddingTop: 20,
     },
-
-
-    // ==========================================
-    // HEADER
-    // ==========================================
-
     header: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 20
+        marginBottom: 20,
     },
-
-
+    headerTextContainer: {
+        flex: 1,
+        marginRight: 12,
+    },
     title: {
         fontSize: 25,
         fontWeight: "800",
-        color: "#292929"
+        color: "#292929",
     },
-
-
     subtitle: {
         fontSize: 13,
         color: "#777",
-        marginTop: 4
+        marginTop: 4,
     },
-
-
+    backButton: {
+        padding: 8,
+    },
     backText: {
         color: "#B64216",
         fontSize: 14,
-        fontWeight: "700"
+        fontWeight: "700",
     },
-
-
-    // ==========================================
-    // SCROLL
-    // ==========================================
-
+    successAlert: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#E8F7EC",
+        borderColor: "#B7E4C7",
+        borderWidth: 1,
+        borderRadius: 14,
+        paddingVertical: 13,
+        paddingHorizontal: 14,
+        marginBottom: 16,
+    },
+    successIconContainer: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: "#CDEFD5",
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 11,
+    },
+    successIcon: {
+        fontSize: 20,
+        color: "#218838",
+        fontWeight: "900",
+    },
+    messageContainer: {
+        flex: 1,
+    },
+    successTitle: {
+        fontSize: 14,
+        color: "#218838",
+        fontWeight: "800",
+        marginBottom: 2,
+    },
+    successAlertText: {
+        fontSize: 13,
+        lineHeight: 19,
+        color: "#276738",
+    },
+    closeButton: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        marginLeft: 8,
+    },
+    closeText: {
+        fontSize: 23,
+        color: "#218838",
+        fontWeight: "600",
+    },
+    errorAlert: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FEF2F2",
+        borderColor: "#FECACA",
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 16,
+    },
+    errorTitle: {
+        color: "#B91C1C",
+        fontWeight: "800",
+        fontSize: 14,
+        marginBottom: 4,
+    },
+    errorText: {
+        color: "#991B1B",
+        fontSize: 13,
+        lineHeight: 19,
+    },
+    errorCloseText: {
+        color: "#B91C1C",
+        fontSize: 23,
+        fontWeight: "600",
+    },
+    scrollView: {
+        flex: 1,
+    },
     scrollContent: {
-        paddingBottom: 30
+        paddingBottom: 30,
     },
-
-
-    // ==========================================
-    // LABEL
-    // ==========================================
-
     label: {
         fontSize: 14,
         fontWeight: "700",
         color: "#292929",
         marginBottom: 7,
-        marginTop: 12
+        marginTop: 12,
     },
-
-
-    // ==========================================
-    // INPUT
-    // ==========================================
-
     input: {
-        height: 50,
+        minHeight: 50,
         backgroundColor: "#FFFFFF",
         borderRadius: 13,
         paddingHorizontal: 15,
+        paddingVertical: 12,
         fontSize: 14,
         color: "#292929",
-        elevation: 2
+        borderWidth: 1,
+        borderColor: "#F0E5DC",
     },
-
-
     textArea: {
         height: 130,
-        paddingTop: 15
+        paddingTop: 15,
     },
-
-
-    // ==========================================
-    // DATE BUTTON
-    // ==========================================
-
     dateButton: {
-        height: 50,
+        minHeight: 50,
         backgroundColor: "#FFFFFF",
         borderRadius: 13,
         paddingHorizontal: 15,
         justifyContent: "center",
-        elevation: 2
+        borderWidth: 1,
+        borderColor: "#F0E5DC",
     },
-
-
     dateButtonText: {
         fontSize: 14,
-        color: "#292929"
+        color: "#292929",
     },
-
-
     placeholderText: {
-        color: "#999"
+        color: "#999",
     },
-
-
     clearButton: {
         alignSelf: "flex-end",
-        marginTop: 8
+        marginTop: 8,
     },
-
-
     clearText: {
         color: "#B64216",
         fontSize: 12,
-        fontWeight: "700"
+        fontWeight: "700",
     },
-
-
     helperText: {
         fontSize: 11,
         color: "#888",
-        marginTop: 5,
-        marginLeft: 3
+        marginTop: 7,
+        marginLeft: 3,
+        lineHeight: 17,
     },
-
-
-    // ==========================================
-    // BUTTON
-    // ==========================================
-
     addButton: {
-        height: 52,
+        minHeight: 52,
         borderRadius: 14,
         backgroundColor: "#B64216",
         justifyContent: "center",
         alignItems: "center",
+        flexDirection: "row",
         marginTop: 25,
-        elevation: 3
+        paddingHorizontal: 15,
     },
-
-
     disabledButton: {
-        opacity: 0.7
+        opacity: 0.7,
     },
-
-
     addButtonText: {
         color: "#FFFFFF",
         fontSize: 15,
-        fontWeight: "800"
+        fontWeight: "800",
+        marginLeft: 10,
     },
-
-
+    returnButton: {
+        minHeight: 48,
+        borderRadius: 13,
+        backgroundColor: "#F3E8E1",
+        justifyContent: "center",
+        alignItems: "center",
+        marginTop: 12,
+    },
+    returnButtonText: {
+        color: "#B64216",
+        fontSize: 14,
+        fontWeight: "800",
+    },
     bottomSpace: {
-        height: 30
-    }
-
+        height: 30,
+    },
 });

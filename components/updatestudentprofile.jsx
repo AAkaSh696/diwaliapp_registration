@@ -1,12 +1,11 @@
-import React, {
-    useEffect,
-    useState
-} from "react";
+
+import React, { useCallback, useEffect, useState } from "react";
 
 import {
     ActivityIndicator,
     Alert,
     Image,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -14,2220 +13,1119 @@ import {
     TouchableOpacity,
     View,
     SafeAreaView,
-    StatusBar
+    StatusBar,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { launchImageLibrary } from "react-native-image-picker";
 
-import {
-    launchImageLibrary
-} from "react-native-image-picker";
-
-
-
+// Change this to your backend's reachable IP address.
 const BASE_URL = "http://10.162.135.224:5001";
 
+/*
+|--------------------------------------------------------------------------
+| Cross-platform helpers
+|--------------------------------------------------------------------------
+*/
 
-export default function UpdateStudent({
-    navigation
-}) {
+const notify = (title, message) => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert(`${title}\n\n${message}`);
+        return;
+    }
 
-    const [loading, setLoading] =
-        useState(true);
+    Alert.alert(title, message);
+};
 
-    const [updating, setUpdating] =
-        useState(false);
+const getResponseData = async (response) => {
+    const text = await response.text();
 
+    let result = {};
 
-    const [profileImage, setProfileImage] =
-        useState(null);
+    try {
+        result = text ? JSON.parse(text) : {};
+    } catch {
+        result = { message: text };
+    }
 
-    const [aadharImage, setAadharImage] =
-        useState(null);
+    if (!response.ok) {
+        throw new Error(
+            result?.msg ||
+            result?.message ||
+            result?.error ||
+            `Request failed with status ${response.status}`
+        );
+    }
 
+    if (result?.success === false) {
+        throw new Error(
+            result?.msg ||
+            result?.message ||
+            "The operation was unsuccessful."
+        );
+    }
 
-    const [currentProfileImage,
-        setCurrentProfileImage] =
-        useState(null);
+    return result;
+};
 
-    const [currentAadharImage,
-        setCurrentAadharImage] =
-        useState(null);
+/*
+|--------------------------------------------------------------------------
+| Cross-platform image upload
+|--------------------------------------------------------------------------
+|
+| Web: sends a real File/Blob.
+| Android: sends { uri, type, name }.
+|
+| Never manually set multipart Content-Type.
+*/
 
+const uploadImageCrossPlatform = async ({
+    token,
+    asset,
+    fieldName,
+    endpoint,
+}) => {
+    if (!asset) {
+        return null;
+    }
+
+    const formData = new FormData();
+
+    formData.append("token", token);
+
+    if (Platform.OS === "web") {
+        let file = asset.file;
+
+        if (
+            !file &&
+            typeof File !== "undefined" &&
+            asset instanceof File
+        ) {
+            file = asset;
+        }
+
+        if (!file && asset.uri) {
+            const imageResponse = await fetch(asset.uri);
+
+            if (!imageResponse.ok) {
+                throw new Error(
+                    "Could not read the selected image."
+                );
+            }
+
+            const blob = await imageResponse.blob();
+
+            if (!blob.size) {
+                throw new Error(
+                    "The selected image is empty."
+                );
+            }
+
+            if (typeof File !== "undefined") {
+                file = new File(
+                    [blob],
+                    asset.fileName || "upload.jpg",
+                    {
+                        type:
+                            asset.type ||
+                            blob.type ||
+                            "image/jpeg",
+                    }
+                );
+            } else {
+                formData.append(
+                    fieldName,
+                    blob,
+                    asset.fileName || "upload.jpg"
+                );
+            }
+        }
+
+        if (file) {
+            formData.append(
+                fieldName,
+                file,
+                file.name || asset.fileName || "upload.jpg"
+            );
+        } else if (!asset.uri) {
+            throw new Error(
+                "Please select the image again."
+            );
+        } else if (typeof File !== "undefined") {
+            throw new Error(
+                "The selected image could not be prepared for upload."
+            );
+        }
+    } else {
+        if (!asset.uri) {
+            throw new Error(
+                "The selected image has no valid URI."
+            );
+        }
+
+        formData.append(fieldName, {
+            uri: asset.uri,
+            type: asset.type || "image/jpeg",
+            name: asset.fileName || "upload.jpg",
+        });
+    }
+
+    const response = await fetch(
+        `${BASE_URL}${endpoint}`,
+        {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+            },
+            body: formData,
+        }
+    );
+
+    return getResponseData(response);
+};
+
+/*
+|--------------------------------------------------------------------------
+| UpdateStudent component
+|--------------------------------------------------------------------------
+*/
+
+export default function UpdateStudent({ navigation }) {
+    const [loading, setLoading] = useState(true);
+    const [updating, setUpdating] = useState(false);
+
+    const [profileImage, setProfileImage] = useState(null);
+    const [aadharImage, setAadharImage] = useState(null);
+
+    const [currentProfileImage, setCurrentProfileImage] =
+        useState("");
+
+    const [currentAadharImage, setCurrentAadharImage] =
+        useState("");
 
     const [form, setForm] = useState({
-
         Name: "",
         batch: "",
         Aadhar: "",
         RollNO: "",
         branch: "",
-        MobileNo: ""
-
+        MobileNo: "",
     });
 
+    const [originalData, setOriginalData] = useState(null);
 
-    const [originalData,
-        setOriginalData] =
-        useState(null);
+    /*
+    |--------------------------------------------------------------------------
+    | Fetch current student data
+    |--------------------------------------------------------------------------
+    */
 
-
-    /* =====================================================
-       SAFE SERVER RESPONSE
-    ===================================================== */
-
-    const getResponseData = async response => {
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "SERVER STATUS:",
-            response.status
-        );
-
-
-        console.log(
-            "SERVER RESPONSE:",
-            text
-        );
-
-
-        if (!text.trim()) {
-
-            return {};
-
-        }
-
-
+    const fetchUserData = useCallback(async () => {
         try {
+            setLoading(true);
 
-            return JSON.parse(text);
-
-        } catch (error) {
-
-            console.log(
-                "INVALID SERVER RESPONSE:",
-                text
-            );
-
-
-            if (response.ok) {
-
-                return {
-                    raw: text
-                };
-
-            }
-
-
-            throw new Error(
-                `Server returned invalid JSON. Status: ${response.status}`
-            );
-
-        }
-
-    };
-
-
-    /* =====================================================
-       FETCH USER
-    ===================================================== */
-
-    useEffect(() => {
-
-        fetchUserData();
-
-    }, []);
-
-
-    const fetchUserData = async () => {
-
-        try {
-
-            const token =
-                await AsyncStorage.getItem(
-                    "token"
-                );
-
+            const token = await AsyncStorage.getItem("token");
 
             if (!token) {
-
-                Alert.alert(
-                    "Session Expired",
-                    "Please login again."
-                );
-
-                navigation.reset({
-                    index: 0,
-                    routes: [
-                        {
-                            name: "Login"
-                        }
-                    ]
-                });
-
-                return;
-
-            }
-
-
-            const response =
-                await fetch(
-                    `${BASE_URL}/registration/getuserdata`,
-                    {
-                        method: "POST",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json",
-
-                            "Accept":
-                                "application/json"
-                        },
-
-                        body: JSON.stringify({
-                            token
-                        })
-                    }
-                );
-
-
-            const result =
-                await getResponseData(
-                    response
-                );
-
-
-            if (!response.ok) {
-
                 throw new Error(
-                    result?.msg ||
-                    result?.message ||
-                    `Unable to fetch user data. Status ${response.status}`
+                    "Your session has expired. Please log in again."
                 );
-
             }
 
+            const response = await fetch(
+                `${BASE_URL}/registration/getuserdata`,
+                {
+                    method: "POST",
+                    headers: {
+                        Accept: "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ token }),
+                }
+            );
 
-            const user =
-                result?.data;
+            const result = await getResponseData(response);
 
+            const user = result?.data;
 
             if (!user) {
-
                 throw new Error(
-                    "User data was not returned by the server."
+                    "Student details could not be found."
                 );
-
             }
 
-
-            const userForm = {
-
-                Name:
-                    user.Name || "",
-
-                batch:
-                    user.batch || "",
-
-                Aadhar:
-                    user.Aadhar || "",
-
-                RollNO:
-                    user.RollNO || "",
-
-                branch:
-                    user.branch || "",
-
-                MobileNo:
-                    user.MobileNo || ""
-
+            const studentData = {
+                Name: user.Name || "",
+                batch: user.batch || "",
+                Aadhar: user.Aadhar || "",
+                RollNO: user.RollNO || "",
+                branch: user.branch || "",
+                MobileNo: user.MobileNo || "",
             };
 
+            setForm(studentData);
+            setOriginalData(studentData);
 
-            setForm(userForm);
+            setCurrentProfileImage(user.url || "");
+            setCurrentAadharImage(user.urlAadhar || "");
 
-            setOriginalData(userForm);
-
-
-            setCurrentProfileImage(
-                user.url || null
-            );
-
-
-            setCurrentAadharImage(
-                user.urlAadhar || null
-            );
-
-
+            setProfileImage(null);
+            setAadharImage(null);
         } catch (error) {
+            console.error("FETCH STUDENT ERROR:", error);
 
-            console.error(
-                "FETCH USER ERROR:",
-                error
+            notify(
+                "Unable to Load Profile",
+                error.message || "Please try again."
             );
-
-
-            Alert.alert(
-                "Unable to Load",
-                error?.message ||
-                "Unable to load your details."
-            );
-
         } finally {
-
             setLoading(false);
-
         }
+    }, []);
 
-    };
+    useEffect(() => {
+        fetchUserData();
+    }, [fetchUserData]);
 
+    /*
+    |--------------------------------------------------------------------------
+    | Form fields
+    |--------------------------------------------------------------------------
+    */
 
-    /* =====================================================
-       UPDATE FIELD
-    ===================================================== */
-
-    const updateField = (
-        field,
-        value
-    ) => {
-
-        setForm(prev => ({
-            ...prev,
-            [field]: value
+    const updateField = (field, value) => {
+        setForm((previous) => ({
+            ...previous,
+            [field]: value,
         }));
-
     };
 
+    const selectImage = async (type) => {
+        try {
+            const result = await launchImageLibrary({
+                mediaType: "photo",
+                selectionLimit: 1,
+                quality: 0.8,
+            });
 
-    /* =====================================================
-       SELECT PROFILE IMAGE
-    ===================================================== */
-
-    const selectProfileImage =
-        async () => {
-
-            try {
-
-                const result =
-                    await launchImageLibrary({
-                        mediaType: "photo",
-                        selectionLimit: 1,
-                        quality: 0.8
-                    });
-
-
-                if (
-                    result.didCancel ||
-                    !result.assets?.length
-                ) {
-
-                    return;
-
-                }
-
-
-                setProfileImage(
-                    result.assets[0]
-                );
-
-
-            } catch (error) {
-
-                console.error(
-                    "PROFILE IMAGE ERROR:",
-                    error
-                );
-
-
-                Alert.alert(
-                    "Error",
-                    "Unable to select profile picture."
-                );
-
+            if (result.didCancel) {
+                return;
             }
 
-        };
-
-
-    /* =====================================================
-       SELECT AADHAAR IMAGE
-    ===================================================== */
-
-    const selectAadharImage =
-        async () => {
-
-            try {
-
-                const result =
-                    await launchImageLibrary({
-                        mediaType: "photo",
-                        selectionLimit: 1,
-                        quality: 0.8
-                    });
-
-
-                if (
-                    result.didCancel ||
-                    !result.assets?.length
-                ) {
-
-                    return;
-
-                }
-
-
-                setAadharImage(
-                    result.assets[0]
+            if (result.errorCode) {
+                throw new Error(
+                    result.errorMessage ||
+                    result.errorCode ||
+                    "Could not open the image library."
                 );
-
-
-            } catch (error) {
-
-                console.error(
-                    "AADHAAR IMAGE ERROR:",
-                    error
-                );
-
-
-                Alert.alert(
-                    "Error",
-                    "Unable to select Aadhaar picture."
-                );
-
             }
 
-        };
+            const asset = result.assets?.[0];
 
+            if (!asset?.uri) {
+                throw new Error(
+                    "No usable image was selected."
+                );
+            }
 
-    /* =====================================================
-       CHECK TEXT CHANGES
-    ===================================================== */
+            if (type === "profile") {
+                setProfileImage(asset);
+            } else {
+                setAadharImage(asset);
+            }
+        } catch (error) {
+            console.error("IMAGE PICKER ERROR:", error);
+
+            notify(
+                "Image Selection Failed",
+                error.message || "Please select the image again."
+            );
+        }
+    };
+
+    /*
+    |--------------------------------------------------------------------------
+    | Change detection
+    |--------------------------------------------------------------------------
+    */
 
     const hasTextChanges = () => {
-
         if (!originalData) {
-
             return false;
-
         }
 
-
-        return (
-
-            form.Name !==
-                originalData.Name ||
-
-            form.batch !==
-                originalData.batch ||
-
-            form.Aadhar !==
-                originalData.Aadhar ||
-
-            form.RollNO !==
-                originalData.RollNO ||
-
-            form.branch !==
-                originalData.branch ||
-
-            form.MobileNo !==
-                originalData.MobileNo
-
-        );
-
+        return Object.keys(form).some((key) => {
+            return (
+                String(form[key] ?? "").trim() !==
+                String(originalData[key] ?? "").trim()
+            );
+        });
     };
-
-
-    /* =====================================================
-       CHECK ANY CHANGES
-    ===================================================== */
 
     const hasAnyChanges = () => {
-
         return (
-
             hasTextChanges() ||
-
-            profileImage !== null ||
-
-            aadharImage !== null
-
+            !!profileImage ||
+            !!aadharImage
         );
-
     };
 
-
-    /* =====================================================
-       VALIDATION
-    ===================================================== */
+    /*
+    |--------------------------------------------------------------------------
+    | Form validation
+    |--------------------------------------------------------------------------
+    */
 
     const validateForm = () => {
-
         if (!form.Name.trim()) {
-
-            Alert.alert(
-                "Required",
-                "Please enter your name."
-            );
-
+            notify("Validation", "Please enter your full name.");
             return false;
-
         }
-
 
         if (!form.batch.trim()) {
-
-            Alert.alert(
-                "Required",
-                "Please select your batch."
-            );
-
+            notify("Validation", "Please enter your batch.");
             return false;
-
         }
 
+        const aadhar = form.Aadhar.trim();
 
-        if (!form.Aadhar.trim()) {
-
-            Alert.alert(
-                "Required",
-                "Please enter your Aadhaar number."
-            );
-
-            return false;
-
-        }
-
-
-        if (
-            !/^\d{12}$/.test(
-                form.Aadhar.trim()
-            )
-        ) {
-
-            Alert.alert(
-                "Invalid Aadhaar",
+        if (aadhar && !/^\d{12}$/.test(aadhar)) {
+            notify(
+                "Validation",
                 "Aadhaar number must contain exactly 12 digits."
             );
-
             return false;
-
         }
 
+        const mobile = form.MobileNo.trim();
 
-        const isOutsider =
-            form.batch.trim().toLowerCase() ===
-            "outsider";
-
-
-        if (
-            !isOutsider &&
-            !form.RollNO.trim()
-        ) {
-
-            Alert.alert(
-                "Required",
-                "Please enter your roll number."
-            );
-
-            return false;
-
-        }
-
-
-        if (
-            !isOutsider &&
-            !form.branch.trim()
-        ) {
-
-            Alert.alert(
-                "Required",
-                "Please select your branch."
-            );
-
-            return false;
-
-        }
-
-
-        if (!form.MobileNo.trim()) {
-
-            Alert.alert(
-                "Required",
-                "Please enter your mobile number."
-            );
-
-            return false;
-
-        }
-
-
-        if (
-            !/^\d{10}$/.test(
-                form.MobileNo.trim()
-            )
-        ) {
-
-            Alert.alert(
-                "Invalid Mobile Number",
+        if (mobile && !/^\d{10}$/.test(mobile)) {
+            notify(
+                "Validation",
                 "Mobile number must contain exactly 10 digits."
             );
-
             return false;
-
         }
 
+        if (form.batch.toLowerCase() !== "outsider") {
+            if (!form.RollNO.trim()) {
+                notify(
+                    "Validation",
+                    "Please enter your roll number."
+                );
+                return false;
+            }
+
+            if (!form.branch.trim()) {
+                notify(
+                    "Validation",
+                    "Please enter your branch."
+                );
+                return false;
+            }
+        }
 
         return true;
-
     };
 
+    /*
+    |--------------------------------------------------------------------------
+    | Update text fields
+    |--------------------------------------------------------------------------
+    */
 
-    /* =====================================================
-       UPDATE TEXT DATA
-    ===================================================== */
+    const updateTextData = async (token) => {
+        if (!hasTextChanges()) {
+            return;
+        }
 
-    const updateTextData =
-        async token => {
+        const payload = {
+            token,
+            Name: form.Name.trim(),
+            batch: form.batch.trim(),
+            Aadhar: form.Aadhar.trim(),
+            MobileNo: form.MobileNo.trim(),
+        };
 
-            if (!hasTextChanges()) {
+        if (form.batch.toLowerCase() !== "outsider") {
+            payload.RollNO = form.RollNO.trim();
+            payload.branch = form.branch.trim();
+        }
 
-                return;
-
+        const response = await fetch(
+            `${BASE_URL}/registration/update`,
+            {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
             }
+        );
 
+        return getResponseData(response);
+    };
 
-            const body = {
+    /*
+    |--------------------------------------------------------------------------
+    | Update profile picture
+    |--------------------------------------------------------------------------
+    */
 
-                token,
+    const updateProfileImage = async (token) => {
+        // Important: do not require a new picture for a text-only update.
+        if (!profileImage) {
+            return null;
+        }
 
-                Name:
-                    form.Name.trim(),
+        return uploadImageCrossPlatform({
+            token,
+            asset: profileImage,
+            fieldName: "pic",
+            endpoint: "/registration/imageupdate",
+        });
+    };
 
-                batch:
-                    form.batch.trim(),
+    /*
+    |--------------------------------------------------------------------------
+    | Update Aadhaar picture
+    |--------------------------------------------------------------------------
+    */
 
-                Aadhar:
-                    form.Aadhar.trim(),
+    const updateAadharImage = async (token) => {
+        // Important: do not require a new Aadhaar picture for other updates.
+        if (!aadharImage) {
+            return null;
+        }
 
-                MobileNo:
-                    form.MobileNo.trim()
+        return uploadImageCrossPlatform({
+            token,
+            asset: aadharImage,
+            fieldName: "picAadhar",
+            endpoint: "/registration/Aadharimageupdate",
+        });
+    };
 
-            };
+    /*
+    |--------------------------------------------------------------------------
+    | Save all changes
+    |--------------------------------------------------------------------------
+    */
 
+    const updateData = async () => {
+        if (updating) {
+            return;
+        }
 
-            const isOutsider =
-                form.batch.trim().toLowerCase() ===
-                "outsider";
-
-
-            if (!isOutsider) {
-
-                body.RollNO =
-                    form.RollNO.trim();
-
-                body.branch =
-                    form.branch.trim();
-
-            }
-
-
-            console.log(
-                "UPDATE BODY:",
-                body
+        if (!hasAnyChanges()) {
+            notify(
+                "No Changes",
+                "You have not changed any profile information."
             );
+            return;
+        }
 
+        if (hasTextChanges() && !validateForm()) {
+            return;
+        }
 
-            const response =
-                await fetch(
-                    `${BASE_URL}/registration/update`,
-                    {
-                        method: "POST",
+        try {
+            setUpdating(true);
 
-                        headers: {
-                            "Content-Type":
-                                "application/json",
+            const token = await AsyncStorage.getItem("token");
 
-                            "Accept":
-                                "application/json"
-                        },
-
-                        body:
-                            JSON.stringify(body)
-                    }
-                );
-
-
-            const result =
-                await getResponseData(
-                    response
-                );
-
-
-            if (!response.ok) {
-
+            if (!token) {
                 throw new Error(
-                    result?.msg ||
-                    result?.message ||
-                    "Unable to update details."
+                    "Your session has expired. Please log in again."
                 );
-
             }
 
-        };
+            // Only changed fields/images trigger their respective requests.
+            await updateTextData(token);
+            await updateProfileImage(token);
+            await updateAadharImage(token);
 
+            // Fetch fresh data from the backend after saving.
+            await fetchUserData();
 
-    /* =====================================================
-       UPDATE PROFILE IMAGE
-       
-       BACKEND ROUTE:
-       /registration/imageupdate
-    ===================================================== */
-
-    const updateProfileImage =
-        async token => {
-
-            if (!profileImage) {
-
-                return;
-
-            }
-
-
-            const formData =
-                new FormData();
-
-
-            formData.append(
-                "token",
-                token
+            notify(
+                "Success",
+                "Your profile has been updated successfully."
             );
 
+            if (navigation?.goBack) {
+                navigation.goBack();
+            }
+        } catch (error) {
+            console.error("UPDATE ERROR:", error);
 
-            formData.append(
-                "pic",
-                {
-                    uri:
-                        profileImage.uri,
-
-                    type:
-                        profileImage.type ||
-                        "image/jpeg",
-
-                    name:
-                        profileImage.fileName ||
-                        "profile.jpg"
-                }
+            notify(
+                "Update Failed",
+                error.message ||
+                    "Unable to update your profile. Please try again."
             );
-
-
-            const response =
-                await fetch(
-                    `${BASE_URL}/registration/imageupdate`,
-                    {
-                        method: "POST",
-
-                        body:
-                            formData
-                    }
-                );
-
-
-            const result =
-                await getResponseData(
-                    response
-                );
-
-
-            if (!response.ok) {
-
-                throw new Error(
-                    result?.msg ||
-                    result?.message ||
-                    "Unable to update profile picture."
-                );
-
-            }
-
-        };
-
-
-    /* =====================================================
-       UPDATE AADHAAR IMAGE
-       
-       BACKEND ROUTE:
-       /registration/Aadharimageupdate
-    ===================================================== */
-
-    const updateAadharImage =
-        async token => {
-
-            if (!aadharImage) {
-
-                return;
-
-            }
-
-
-            const formData =
-                new FormData();
-
-
-            formData.append(
-                "token",
-                token
-            );
-
-
-            formData.append(
-                "picAadhar",
-                {
-                    uri:
-                        aadharImage.uri,
-
-                    type:
-                        aadharImage.type ||
-                        "image/jpeg",
-
-                    name:
-                        aadharImage.fileName ||
-                        "aadhar.jpg"
-                }
-            );
-
-
-            const response =
-                await fetch(
-                    `${BASE_URL}/registration/Aadharimageupdate`,
-                    {
-                        method: "POST",
-
-                        body:
-                            formData
-                    }
-                );
-
-
-            const result =
-                await getResponseData(
-                    response
-                );
-
-
-            if (!response.ok) {
-
-                throw new Error(
-                    result?.msg ||
-                    result?.message ||
-                    "Unable to update Aadhaar picture."
-                );
-
-            }
-
-        };
-
-
-    /* =====================================================
-       MAIN UPDATE
-    ===================================================== */
-
-    const updateData =
-        async () => {
-
-            if (!hasAnyChanges()) {
-
-                Alert.alert(
-                    "No Changes",
-                    "You have not changed any information."
-                );
-
-                return;
-
-            }
-
-
-            if (
-                hasTextChanges() &&
-                !validateForm()
-            ) {
-
-                return;
-
-            }
-
-
-            try {
-
-                setUpdating(true);
-
-
-                const token =
-                    await AsyncStorage.getItem(
-                        "token"
-                    );
-
-
-                if (!token) {
-
-                    Alert.alert(
-                        "Session Expired",
-                        "Please login again."
-                    );
-
-                    return;
-
-                }
-
-
-                await updateTextData(
-                    token
-                );
-
-
-                await updateProfileImage(
-                    token
-                );
-
-
-                await updateAadharImage(
-                    token
-                );
-
-
-                Alert.alert(
-                    "Updated Successfully",
-                    "Your details have been updated. Your profile is now unverified and must be verified again by the admin.",
-                    [
-                        {
-                            text: "OK",
-
-                            onPress: () => {
-
-                                navigation.goBack();
-
-                            }
-                        }
-                    ]
-                );
-
-
-            } catch (error) {
-
-                console.error(
-                    "UPDATE ERROR:",
-                    error
-                );
-
-
-                Alert.alert(
-                    "Update Failed",
-                    error?.message ||
-                    "Unable to update your details."
-                );
-
-
-            } finally {
-
-                setUpdating(false);
-
-            }
-
-        };
-
-
-    /* =====================================================
-       LOADING
-    ===================================================== */
+        } finally {
+            setUpdating(false);
+        }
+    };
+
+    /*
+    |--------------------------------------------------------------------------
+    | Loading screen
+    |--------------------------------------------------------------------------
+    */
 
     if (loading) {
-
         return (
-
-            <SafeAreaView
-                style={
-                    styles.safeArea
-                }
-            >
-
+            <SafeAreaView style={styles.loadingContainer}>
                 <StatusBar
                     barStyle="dark-content"
                     backgroundColor="#FFF8F0"
                 />
 
-                <View
-                    style={
-                        styles.loadingContainer
-                    }
-                >
+                <ActivityIndicator
+                    size="large"
+                    color="#B64216"
+                />
 
-                    <ActivityIndicator
-                        size="large"
-                        color="#B64216"
-                    />
-
-                    <Text
-                        style={
-                            styles.loadingText
-                        }
-                    >
-                        Loading your details...
-                    </Text>
-
-                </View>
-
+                <Text style={styles.loadingText}>
+                    Loading your profile...
+                </Text>
             </SafeAreaView>
-
         );
-
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Main screen
+    |--------------------------------------------------------------------------
+    */
 
-    /* =====================================================
-       UI
-    ===================================================== */
+    const profilePreview =
+        profileImage?.uri || currentProfileImage;
+
+    const aadharPreview =
+        aadharImage?.uri || currentAadharImage;
 
     return (
-
-        <SafeAreaView
-            style={
-                styles.safeArea
-            }
-        >
-
+        <SafeAreaView style={styles.safeArea}>
             <StatusBar
                 barStyle="dark-content"
                 backgroundColor="#FFF8F0"
             />
 
-
             <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={
-                    styles.container
-                }
+                contentContainerStyle={styles.scrollContent}
                 keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
             >
-
-                {/* =================================================
-                   HEADER
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.header
-                    }
-                >
-
-                    <View
-                        style={
-                            styles.logoCircle
-                        }
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        style={styles.backButton}
+                        onPress={() => navigation?.goBack?.()}
                     >
+                        <Text style={styles.backButtonText}>
+                            {"‹"}
+                        </Text>
+                    </TouchableOpacity>
 
-                        <Text
-                            style={
-                                styles.logo
-                            }
-                        >
-                            🪔
+                    <View style={styles.headerTextContainer}>
+                        <Text style={styles.heading}>
+                            Update Profile
                         </Text>
 
+                        <Text style={styles.subtitle}>
+                            Keep your student information up to date.
+                        </Text>
                     </View>
-
-
-                    <View>
-
-                        <Text
-                            style={
-                                styles.brand
-                            }
-                        >
-                            DiwaliGhaat
-                        </Text>
-
-
-                        <Text
-                            style={
-                                styles.subtitle
-                            }
-                        >
-                            Update Student Profile
-                        </Text>
-
-                    </View>
-
                 </View>
 
-
-                {/* =================================================
-                   HERO
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.hero
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.heroEmoji
-                        }
-                    >
-                        ✏️
-                    </Text>
-
-
-                    <View
-                        style={{
-                            flex: 1
-                        }}
-                    >
-
-                        <Text
-                            style={
-                                styles.heroTitle
-                            }
-                        >
-                            Update Your Profile
-                        </Text>
-
-
-                        <Text
-                            style={
-                                styles.heroText
-                            }
-                        >
-                            Make sure all your information
-                            and documents are correct.
-                        </Text>
-
-                    </View>
-
-                </View>
-
-
-                {/* =================================================
-                   WARNING
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.warningBox
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.warningIcon
-                        }
-                    >
-                        ⚠️
-                    </Text>
-
-
-                    <Text
-                        style={
-                            styles.warningText
-                        }
-                    >
-                        Any change to your information or
-                        documents will remove your current
-                        verification. Your profile will need
-                        to be verified again by the admin.
-                    </Text>
-
-                </View>
-
-
-                {/* =================================================
-                   PROFILE PICTURE
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.card
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.sectionTitle
-                        }
-                    >
+                {/* Profile picture */}
+                <View style={styles.card}>
+                    <Text style={styles.sectionTitle}>
                         Profile Picture
                     </Text>
 
-
-                    <Text
-                        style={
-                            styles.documentHint
-                        }
-                    >
-                        Use a clear photograph of yourself.
-                    </Text>
-
-
-                    <TouchableOpacity
-                        style={
-                            styles.profileUploadBox
-                        }
-                        onPress={
-                            selectProfileImage
-                        }
-                        activeOpacity={0.8}
-                    >
-
-                        {(
-                            profileImage?.uri ||
-                            currentProfileImage
-                        ) ? (
-
+                    <View style={styles.imageSection}>
+                        {profilePreview ? (
                             <Image
-                                source={{
-                                    uri:
-                                        profileImage?.uri ||
-                                        currentProfileImage
-                                }}
-                                style={
-                                    styles.profilePreview
-                                }
+                                source={{ uri: profilePreview }}
+                                style={styles.profileImage}
+                                resizeMode="cover"
                             />
-
                         ) : (
-
-                            <>
-
-                                <Text
-                                    style={
-                                        styles.uploadIcon
-                                    }
-                                >
-                                    📷
+                            <View style={styles.profilePlaceholder}>
+                                <Text style={styles.placeholderText}>
+                                    No Photo
                                 </Text>
-
-
-                                <Text
-                                    style={
-                                        styles.uploadTitle
-                                    }
-                                >
-                                    Select Profile Picture
-                                </Text>
-
-
-                                <Text
-                                    style={
-                                        styles.uploadText
-                                    }
-                                >
-                                    Tap to choose a new photograph
-                                </Text>
-
-                            </>
-
+                            </View>
                         )}
 
-                    </TouchableOpacity>
+                        <View style={styles.imageDetails}>
+                            <Text style={styles.imageTitle}>
+                                Your profile photo
+                            </Text>
 
+                            <Text style={styles.imageDescription}>
+                                Choose a clear image of yourself.
+                            </Text>
 
-                    <TouchableOpacity
-                        style={
-                            styles.changeButton
-                        }
-                        onPress={
-                            selectProfileImage
-                        }
-                    >
+                            <TouchableOpacity
+                                style={styles.secondaryButton}
+                                onPress={() => selectImage("profile")}
+                            >
+                                <Text style={styles.secondaryButtonText}>
+                                    {profileImage
+                                        ? "Change Photo"
+                                        : "Choose Photo"}
+                                </Text>
+                            </TouchableOpacity>
 
-                        <Text
-                            style={
-                                styles.changeButtonText
-                            }
-                        >
-                            {profileImage
-                                ? "Change Picture"
-                                : "Select Picture"}
-                        </Text>
-
-                    </TouchableOpacity>
-
+                            {profileImage ? (
+                                <Text style={styles.selectedText}>
+                                    New photo selected
+                                </Text>
+                            ) : null}
+                        </View>
+                    </View>
                 </View>
 
-
-                {/* =================================================
-                   PERSONAL INFORMATION
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.card
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.sectionTitle
-                        }
-                    >
+                {/* Personal details */}
+                <View style={styles.card}>
+                    <Text style={styles.sectionTitle}>
                         Personal Information
                     </Text>
 
-
-                    {/* NAME */}
-
-                    <Text
-                        style={
-                            styles.label
-                        }
-                    >
-                        Full Name *
-                    </Text>
-
-
-                    <TextInput
-                        style={
-                            styles.input
+                    <FormField
+                        label="Full Name"
+                        value={form.Name}
+                        onChangeText={(value) =>
+                            updateField("Name", value)
                         }
                         placeholder="Enter your full name"
-                        placeholderTextColor="#999"
-                        value={
-                            form.Name
-                        }
-                        onChangeText={
-                            value =>
-                                updateField(
-                                    "Name",
-                                    value
-                                )
-                        }
-                        autoCapitalize="words"
                     />
 
-
-                    {/* MOBILE */}
-
-                    <Text
-                        style={
-                            styles.label
+                    <FormField
+                        label="Batch"
+                        value={form.batch}
+                        onChangeText={(value) =>
+                            updateField("batch", value)
                         }
-                    >
-                        Mobile Number *
-                    </Text>
+                        placeholder="e.g. 2027 or outsider"
+                        autoCapitalize="none"
+                    />
 
-
-                    <TextInput
-                        style={
-                            styles.input
+                    <FormField
+                        label="Roll Number"
+                        value={form.RollNO}
+                        onChangeText={(value) =>
+                            updateField("RollNO", value)
                         }
-                        placeholder="Enter 10 digit mobile number"
-                        placeholderTextColor="#999"
-                        value={
-                            form.MobileNo
-                        }
-                        onChangeText={
-                            value => {
+                        placeholder="Enter your roll number"
+                    />
 
-                                updateField(
-                                    "MobileNo",
-                                    value.replace(
-                                        /[^0-9]/g,
-                                        ""
-                                    )
-                                );
-
-                            }
+                    <FormField
+                        label="Branch"
+                        value={form.branch}
+                        onChangeText={(value) =>
+                            updateField("branch", value)
                         }
-                        keyboardType="number-pad"
+                        placeholder="e.g. cse"
+                    />
+
+                    <FormField
+                        label="Mobile Number"
+                        value={form.MobileNo}
+                        onChangeText={(value) =>
+                            updateField(
+                                "MobileNo",
+                                value.replace(/\D/g, "").slice(0, 10)
+                            )
+                        }
+                        placeholder="Enter 10-digit mobile number"
+                        keyboardType="phone-pad"
                         maxLength={10}
                     />
 
-
-                    {/* AADHAAR */}
-
-                    <Text
-                        style={
-                            styles.label
+                    <FormField
+                        label="Aadhaar Number"
+                        value={form.Aadhar}
+                        onChangeText={(value) =>
+                            updateField(
+                                "Aadhar",
+                                value.replace(/\D/g, "").slice(0, 12)
+                            )
                         }
-                    >
-                        Aadhaar Number *
-                    </Text>
-
-
-                    <TextInput
-                        style={
-                            styles.input
-                        }
-                        placeholder="Enter 12 digit Aadhaar number"
-                        placeholderTextColor="#999"
-                        value={
-                            form.Aadhar
-                        }
-                        onChangeText={
-                            value => {
-
-                                updateField(
-                                    "Aadhar",
-                                    value.replace(
-                                        /[^0-9]/g,
-                                        ""
-                                    )
-                                );
-
-                            }
-                        }
+                        placeholder="Enter 12-digit Aadhaar number"
                         keyboardType="number-pad"
                         maxLength={12}
-                        secureTextEntry
                     />
-
                 </View>
 
-
-                {/* =================================================
-                   ACADEMIC INFORMATION
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.card
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.sectionTitle
-                        }
-                    >
-                        Academic Information
+                {/* Aadhaar document */}
+                <View style={styles.card}>
+                    <Text style={styles.sectionTitle}>
+                        Aadhaar Image
                     </Text>
 
+                    <Text style={styles.imageDescription}>
+                        Select your Aadhaar image if you need to replace
+                        the existing document.
+                    </Text>
 
-                    {/* ROLL NUMBER */}
-
-                    {!(
-                        form.batch
-                            .trim()
-                            .toLowerCase() ===
-                        "outsider"
-                    ) && (
-
-                        <>
-
-                            <Text
-                                style={
-                                    styles.label
-                                }
-                            >
-                                Roll Number *
+                    {aadharPreview ? (
+                        <Image
+                            source={{ uri: aadharPreview }}
+                            style={styles.aadharImage}
+                            resizeMode="contain"
+                        />
+                    ) : (
+                        <View style={styles.aadharPlaceholder}>
+                            <Text style={styles.placeholderText}>
+                                No Aadhaar image available
                             </Text>
-
-
-                            <TextInput
-                                style={
-                                    styles.input
-                                }
-                                placeholder="Enter Roll Number"
-                                placeholderTextColor="#999"
-                                value={
-                                    form.RollNO
-                                }
-                                onChangeText={
-                                    value =>
-                                        updateField(
-                                            "RollNO",
-                                            value
-                                        )
-                                }
-                                autoCapitalize="characters"
-                            />
-
-                        </>
-
+                        </View>
                     )}
 
-
-                    {/* BATCH */}
-
-                    <Text
-                        style={
-                            styles.label
-                        }
-                    >
-                        Batch *
-                    </Text>
-
-
-                    <View
-                        style={
-                            styles.options
-                        }
-                    >
-
-                        {[
-                            "2027",
-                            "2028",
-                            "2029",
-                            "2030",
-                            "outsider"
-                        ].map(item => (
-
-                            <TouchableOpacity
-                                key={item}
-                                style={[
-                                    styles.option,
-
-                                    form.batch
-                                        .toLowerCase() ===
-                                        item.toLowerCase() &&
-                                    styles.optionActive
-                                ]}
-                                onPress={() =>
-                                    updateField(
-                                        "batch",
-                                        item
-                                    )
-                                }
-                            >
-
-                                <Text
-                                    style={[
-                                        styles.optionText,
-
-                                        form.batch
-                                            .toLowerCase() ===
-                                            item.toLowerCase() &&
-                                        styles.optionTextActive
-                                    ]}
-                                >
-                                    {item}
-                                </Text>
-
-                            </TouchableOpacity>
-
-                        ))}
-
-                    </View>
-
-
-                    {/* BRANCH */}
-
-                    {!(
-                        form.batch
-                            .trim()
-                            .toLowerCase() ===
-                        "outsider"
-                    ) && (
-
-                        <>
-
-                            <Text
-                                style={
-                                    styles.label
-                                }
-                            >
-                                Branch *
-                            </Text>
-
-
-                            <View
-                                style={
-                                    styles.options
-                                }
-                            >
-
-                                {[
-                                    "cse",
-                                    "ece",
-                                    "biotech",
-                                    "mechanical",
-                                    "civil",
-                                    "eco",
-                                    "AI/ML"
-                                ].map(item => (
-
-                                    <TouchableOpacity
-                                        key={item}
-                                        style={[
-                                            styles.option,
-
-                                            form.branch
-                                                .toLowerCase() ===
-                                                item.toLowerCase() &&
-                                            styles.optionActive
-                                        ]}
-                                        onPress={() =>
-                                            updateField(
-                                                "branch",
-                                                item
-                                            )
-                                        }
-                                    >
-
-                                        <Text
-                                            style={[
-                                                styles.optionText,
-
-                                                form.branch
-                                                    .toLowerCase() ===
-                                                    item.toLowerCase() &&
-                                                styles.optionTextActive
-                                            ]}
-                                        >
-                                            {item}
-                                        </Text>
-
-                                    </TouchableOpacity>
-
-                                ))}
-
-                            </View>
-
-                        </>
-
-                    )}
-
-                </View>
-
-
-                {/* =================================================
-                   AADHAAR DOCUMENT
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.card
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.sectionTitle
-                        }
-                    >
-                        Aadhaar Document
-                    </Text>
-
-
-                    <Text
-                        style={
-                            styles.documentHint
-                        }
-                    >
-                        Upload a clear and readable Aadhaar image.
-                    </Text>
-
-
                     <TouchableOpacity
-                        style={
-                            styles.uploadBox
-                        }
-                        onPress={
-                            selectAadharImage
-                        }
-                        activeOpacity={0.8}
+                        style={styles.secondaryButton}
+                        onPress={() => selectImage("aadhar")}
                     >
-
-                        {(
-                            aadharImage?.uri ||
-                            currentAadharImage
-                        ) ? (
-
-                            <Image
-                                source={{
-                                    uri:
-                                        aadharImage?.uri ||
-                                        currentAadharImage
-                                }}
-                                style={
-                                    styles.aadharPreview
-                                }
-                            />
-
-                        ) : (
-
-                            <>
-
-                                <Text
-                                    style={
-                                        styles.uploadIcon
-                                    }
-                                >
-                                    🪪
-                                </Text>
-
-
-                                <Text
-                                    style={
-                                        styles.uploadTitle
-                                    }
-                                >
-                                    Upload Aadhaar Card
-                                </Text>
-
-
-                                <Text
-                                    style={
-                                        styles.uploadText
-                                    }
-                                >
-                                    Tap to select Aadhaar image
-                                </Text>
-
-                            </>
-
-                        )}
-
-                    </TouchableOpacity>
-
-
-                    <TouchableOpacity
-                        style={
-                            styles.changeButton
-                        }
-                        onPress={
-                            selectAadharImage
-                        }
-                    >
-
-                        <Text
-                            style={
-                                styles.changeButtonText
-                            }
-                        >
+                        <Text style={styles.secondaryButtonText}>
                             {aadharImage
-                                ? "Change Aadhaar Picture"
-                                : "Select Aadhaar Picture"}
+                                ? "Change Aadhaar Image"
+                                : "Choose Aadhaar Image"}
                         </Text>
-
                     </TouchableOpacity>
 
+                    {aadharImage ? (
+                        <Text style={styles.selectedText}>
+                            New Aadhaar image selected
+                        </Text>
+                    ) : null}
                 </View>
 
-
-                {/* =================================================
-                   INFORMATION BOX
-                ================================================= */}
-
-                <View
-                    style={
-                        styles.infoBox
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.infoIcon
-                        }
-                    >
-                        🔐
-                    </Text>
-
-
-                    <Text
-                        style={
-                            styles.infoText
-                        }
-                    >
-                        Your updated information will become
-                        unverified and must be reviewed again
-                        by an administrator.
-                    </Text>
-
-                </View>
-
-
-                {/* =================================================
-                   UPDATE BUTTON
-                ================================================= */}
-
+                {/* Save */}
                 <TouchableOpacity
                     style={[
-                        styles.button,
-
-                        updating &&
-                        styles.buttonDisabled
+                        styles.saveButton,
+                        updating && styles.disabledButton,
                     ]}
-                    onPress={
-                        updateData
-                    }
-                    disabled={
-                        updating
-                    }
-                    activeOpacity={0.8}
+                    onPress={updateData}
+                    disabled={updating}
+                    activeOpacity={0.85}
                 >
-
                     {updating ? (
+                        <View style={styles.savingContent}>
+                            <ActivityIndicator
+                                color="#FFFFFF"
+                                size="small"
+                            />
 
-                        <ActivityIndicator
-                            color="#FFFFFF"
-                        />
-
+                            <Text style={styles.saveButtonText}>
+                                Saving Changes...
+                            </Text>
+                        </View>
                     ) : (
-
-                        <>
-
-                            <Text
-                                style={
-                                    styles.buttonText
-                                }
-                            >
-                                Update Profile
-                            </Text>
-
-
-                            <Text
-                                style={
-                                    styles.arrow
-                                }
-                            >
-                                →
-                            </Text>
-
-                        </>
-
+                        <Text style={styles.saveButtonText}>
+                            Save Changes
+                        </Text>
                     )}
-
                 </TouchableOpacity>
 
-
-                {/* =================================================
-                   CANCEL
-                ================================================= */}
-
-                <TouchableOpacity
-                    style={
-                        styles.cancelButton
-                    }
-                    onPress={() =>
-                        navigation.goBack()
-                    }
-                    disabled={
-                        updating
-                    }
-                >
-
-                    <Text
-                        style={
-                            styles.cancelButtonText
-                        }
-                    >
-                        Cancel
-                    </Text>
-
-                </TouchableOpacity>
-
-
-                {/* FOOTER */}
-
-                <Text
-                    style={
-                        styles.footer
-                    }
-                >
-                    🪔 Celebrate. Connect. Belong.
+                <Text style={styles.footerText}>
+                    Your changes will be saved to your student profile.
                 </Text>
-
             </ScrollView>
-
         </SafeAreaView>
-
     );
-
 }
 
+/*
+|--------------------------------------------------------------------------
+| Reusable input component
+|--------------------------------------------------------------------------
+*/
 
-/* =====================================================
-   STYLES
-===================================================== */
+function FormField({
+    label,
+    value,
+    onChangeText,
+    placeholder,
+    keyboardType = "default",
+    maxLength,
+    autoCapitalize = "words",
+}) {
+    return (
+        <View style={styles.fieldContainer}>
+            <Text style={styles.label}>{label}</Text>
+
+            <TextInput
+                style={styles.input}
+                value={value}
+                onChangeText={onChangeText}
+                placeholder={placeholder}
+                placeholderTextColor="#9B918B"
+                keyboardType={keyboardType}
+                maxLength={maxLength}
+                autoCapitalize={autoCapitalize}
+                autoCorrect={false}
+            />
+        </View>
+    );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Styles
+|--------------------------------------------------------------------------
+*/
 
 const styles = StyleSheet.create({
-
     safeArea: {
         flex: 1,
-        backgroundColor: "#FFF8F0"
+        backgroundColor: "#FFF8F0",
     },
-
-
-    container: {
-        padding: 20,
-        paddingBottom: 40
-    },
-
-
-    /* ================= LOADING ================= */
 
     loadingContainer: {
         flex: 1,
-        justifyContent: "center",
         alignItems: "center",
-        backgroundColor: "#FFF8F0"
+        justifyContent: "center",
+        backgroundColor: "#FFF8F0",
     },
-
 
     loadingText: {
-        marginTop: 12,
-        fontSize: 14,
-        color: "#777"
+        marginTop: 14,
+        color: "#6E625B",
+        fontSize: 15,
     },
 
-
-    /* ================= HEADER ================= */
+    scrollContent: {
+        width: "100%",
+        maxWidth: 760,
+        alignSelf: "center",
+        paddingHorizontal: 20,
+        paddingTop: 18,
+        paddingBottom: 40,
+    },
 
     header: {
         flexDirection: "row",
         alignItems: "center",
-        marginBottom: 20
+        marginBottom: 24,
     },
 
-
-    logoCircle: {
-        width: 55,
-        height: 55,
-        borderRadius: 28,
-        backgroundColor: "#FFF0E0",
-        justifyContent: "center",
+    backButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        backgroundColor: "#FFFFFF",
         alignItems: "center",
-        marginRight: 12
+        justifyContent: "center",
+        borderWidth: 1,
+        borderColor: "#F0E4D9",
+        marginRight: 14,
     },
 
-
-    logo: {
-        fontSize: 27
+    backButtonText: {
+        color: "#B64216",
+        fontSize: 34,
+        lineHeight: 38,
+        marginTop: -4,
     },
 
+    headerTextContainer: {
+        flex: 1,
+    },
 
-    brand: {
-        fontSize: 26,
+    heading: {
+        fontSize: 25,
         fontWeight: "800",
-        color: "#B64216"
+        color: "#30241F",
     },
-
 
     subtitle: {
-        fontSize: 12,
-        color: "#888",
-        marginTop: 2
+        color: "#7D6C62",
+        fontSize: 13,
+        marginTop: 5,
+        lineHeight: 19,
     },
-
-
-    /* ================= HERO ================= */
-
-    hero: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: "#B64216",
-        borderRadius: 22,
-        padding: 18,
-        marginBottom: 16
-    },
-
-
-    heroEmoji: {
-        fontSize: 35,
-        marginRight: 14
-    },
-
-
-    heroTitle: {
-        color: "#FFFFFF",
-        fontSize: 17,
-        fontWeight: "800"
-    },
-
-
-    heroText: {
-        color: "#FFE8D8",
-        fontSize: 11,
-        lineHeight: 17,
-        marginTop: 4
-    },
-
-
-    /* ================= WARNING ================= */
-
-    warningBox: {
-        flexDirection: "row",
-        backgroundColor: "#FFF6DF",
-        borderRadius: 16,
-        padding: 15,
-        marginBottom: 17
-    },
-
-
-    warningIcon: {
-        fontSize: 21,
-        marginRight: 10
-    },
-
-
-    warningText: {
-        flex: 1,
-        fontSize: 11,
-        lineHeight: 17,
-        color: "#78663D"
-    },
-
-
-    /* ================= CARD ================= */
 
     card: {
         backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 18,
-        marginBottom: 16,
-        elevation: 3
+        borderRadius: 18,
+        padding: 20,
+        marginBottom: 18,
+        borderWidth: 1,
+        borderColor: "#F0E4D9",
+        ...(Platform.OS === "web"
+            ? { boxShadow: "0px 3px 12px rgba(70, 35, 15, 0.05)" }
+            : {
+                  elevation: 2,
+              }),
     },
-
 
     sectionTitle: {
-        fontSize: 17,
+        fontSize: 18,
         fontWeight: "800",
-        color: "#292929",
-        marginBottom: 3
+        color: "#30241F",
+        marginBottom: 18,
     },
 
-
-    documentHint: {
-        color: "#999",
-        fontSize: 11,
-        marginBottom: 10
+    imageSection: {
+        flexDirection: "row",
+        alignItems: "center",
+        flexWrap: "wrap",
     },
 
+    profileImage: {
+        width: 112,
+        height: 112,
+        borderRadius: 56,
+        backgroundColor: "#F3E8DF",
+        marginRight: 18,
+        marginBottom: 8,
+    },
 
-    /* ================= INPUT ================= */
+    profilePlaceholder: {
+        width: 112,
+        height: 112,
+        borderRadius: 56,
+        backgroundColor: "#F3E8DF",
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 18,
+        marginBottom: 8,
+    },
+
+    placeholderText: {
+        fontSize: 12,
+        color: "#8A7467",
+        textAlign: "center",
+        paddingHorizontal: 8,
+    },
+
+    imageDetails: {
+        flex: 1,
+        minWidth: 180,
+        paddingVertical: 8,
+    },
+
+    imageTitle: {
+        color: "#30241F",
+        fontWeight: "700",
+        fontSize: 15,
+        marginBottom: 5,
+    },
+
+    imageDescription: {
+        color: "#7D6C62",
+        fontSize: 13,
+        lineHeight: 20,
+        marginBottom: 12,
+    },
+
+    secondaryButton: {
+        alignSelf: "flex-start",
+        backgroundColor: "#FFF1E8",
+        borderColor: "#F1D0BC",
+        borderWidth: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        borderRadius: 10,
+        marginTop: 4,
+    },
+
+    secondaryButtonText: {
+        color: "#A53A13",
+        fontWeight: "700",
+        fontSize: 13,
+    },
+
+    selectedText: {
+        color: "#267346",
+        fontSize: 12,
+        marginTop: 8,
+        fontWeight: "600",
+    },
+
+    fieldContainer: {
+        marginBottom: 17,
+    },
 
     label: {
         fontSize: 13,
         fontWeight: "700",
-        color: "#444",
-        marginTop: 15,
-        marginBottom: 7
+        color: "#57453B",
+        marginBottom: 8,
     },
-
 
     input: {
-        height: 50,
+        width: "100%",
+        minHeight: 48,
+        backgroundColor: "#FFFCF9",
         borderWidth: 1,
-        borderColor: "#E6DCD2",
-        borderRadius: 13,
-        paddingHorizontal: 14,
-        fontSize: 14,
-        color: "#222",
-        backgroundColor: "#FFFCF9"
-    },
-
-
-    /* ================= OPTIONS ================= */
-
-    options: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8
-    },
-
-
-    option: {
-        minWidth: 72,
-        height: 42,
-        paddingHorizontal: 14,
+        borderColor: "#E8DCD1",
         borderRadius: 11,
-        borderWidth: 1,
-        borderColor: "#E5DAD0",
-        justifyContent: "center",
-        alignItems: "center",
-        backgroundColor: "#FFFCF9"
-    },
-
-
-    optionActive: {
-        backgroundColor: "#FFF0E4",
-        borderColor: "#B64216"
-    },
-
-
-    optionText: {
-        color: "#777",
-        fontSize: 12,
-        fontWeight: "600"
-    },
-
-
-    optionTextActive: {
-        color: "#B64216",
-        fontWeight: "800"
-    },
-
-
-    /* ================= PROFILE ================= */
-
-    profileUploadBox: {
-        width: 155,
-        height: 155,
-        alignSelf: "center",
-        borderRadius: 78,
-        borderWidth: 1.5,
-        borderColor: "#E5D4C7",
-        borderStyle: "dashed",
-        backgroundColor: "#FFFBF7",
-        justifyContent: "center",
-        alignItems: "center",
-        overflow: "hidden",
-        marginTop: 10
-    },
-
-
-    profilePreview: {
-        width: "100%",
-        height: "100%",
-        resizeMode: "cover"
-    },
-
-
-    changeButton: {
-        alignSelf: "center",
-        marginTop: 12,
-        backgroundColor: "#FFF0E4",
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        borderRadius: 11
-    },
-
-
-    changeButtonText: {
-        color: "#B64216",
-        fontSize: 12,
-        fontWeight: "800"
-    },
-
-
-    /* ================= UPLOAD ================= */
-
-    uploadBox: {
-        height: 190,
-        borderRadius: 17,
-        borderWidth: 1.5,
-        borderColor: "#E5D4C7",
-        borderStyle: "dashed",
-        backgroundColor: "#FFFBF7",
-        justifyContent: "center",
-        alignItems: "center",
-        overflow: "hidden",
-        marginTop: 5
-    },
-
-
-    uploadIcon: {
-        fontSize: 32,
-        marginBottom: 8
-    },
-
-
-    uploadTitle: {
-        fontSize: 14,
-        fontWeight: "800",
-        color: "#444"
-    },
-
-
-    uploadText: {
-        fontSize: 11,
-        color: "#999",
-        marginTop: 4
-    },
-
-
-    aadharPreview: {
-        width: "100%",
-        height: "100%",
-        resizeMode: "contain",
-        backgroundColor: "#F5F5F5"
-    },
-
-
-    /* ================= INFO ================= */
-
-    infoBox: {
-        flexDirection: "row",
-        backgroundColor: "#FFF6DF",
-        borderRadius: 16,
-        padding: 15,
-        marginBottom: 17
-    },
-
-
-    infoIcon: {
-        fontSize: 21,
-        marginRight: 10
-    },
-
-
-    infoText: {
-        flex: 1,
-        fontSize: 11,
-        lineHeight: 17,
-        color: "#78663D"
-    },
-
-
-    /* ================= BUTTON ================= */
-
-    button: {
-        height: 56,
-        borderRadius: 15,
-        backgroundColor: "#B64216",
-        justifyContent: "center",
-        alignItems: "center",
-        flexDirection: "row",
-        elevation: 5
-    },
-
-
-    buttonDisabled: {
-        opacity: 0.6
-    },
-
-
-    buttonText: {
-        color: "#FFFFFF",
+        paddingHorizontal: 14,
+        paddingVertical: Platform.OS === "ios" ? 13 : 10,
         fontSize: 15,
-        fontWeight: "800"
+        color: "#30241F",
     },
 
-
-    arrow: {
-        color: "#FFFFFF",
-        fontSize: 22,
-        marginLeft: 10
+    aadharImage: {
+        width: "100%",
+        height: 220,
+        borderRadius: 12,
+        backgroundColor: "#FFF8F0",
+        marginBottom: 12,
     },
 
-
-    /* ================= CANCEL ================= */
-
-    cancelButton: {
-        height: 50,
-        justifyContent: "center",
+    aadharPlaceholder: {
+        width: "100%",
+        minHeight: 130,
+        borderRadius: 12,
+        backgroundColor: "#FFF8F0",
+        borderWidth: 1,
+        borderColor: "#F0E4D9",
         alignItems: "center",
-        marginTop: 5
+        justifyContent: "center",
+        marginBottom: 12,
     },
 
-
-    cancelButtonText: {
-        color: "#777",
-        fontSize: 13,
-        fontWeight: "700"
+    saveButton: {
+        minHeight: 52,
+        backgroundColor: "#B64216",
+        borderRadius: 13,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 4,
+        paddingHorizontal: 16,
     },
 
+    disabledButton: {
+        opacity: 0.7,
+    },
 
-    /* ================= FOOTER ================= */
+    saveButtonText: {
+        color: "#FFFFFF",
+        fontSize: 16,
+        fontWeight: "800",
+    },
 
-    footer: {
-        textAlign: "center",
-        color: "#999",
+    savingContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+    },
+
+    footerText: {
         fontSize: 12,
-        marginTop: 12
-    }
-
+        color: "#8A796E",
+        textAlign: "center",
+        marginTop: 14,
+        lineHeight: 18,
+    },
 });

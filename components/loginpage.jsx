@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+
+import React, { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
@@ -14,7 +15,6 @@ import {
     Alert as RNAlert
 } from "react-native";
 
-// Alert.alert does nothing on web, so use window.alert there
 const Alert = {
     alert: (title, msg) =>
         Platform.OS === "web"
@@ -22,11 +22,14 @@ const Alert = {
             : RNAlert.alert(title, msg)
 };
 
-// One backend (AWS) for web, Android and iOS
+// Backend for web, Android and iOS
 const BASE_URL = "http://10.162.135.224:5001";
 
+// OTP cooldown in seconds
+const OTP_COOLDOWN = 13;
+
 export default function Login({ navigation }) {
-    const [loginType, setLoginType] = useState("student");
+    const [loginType, setLoginType] = useState("user");
 
     const [email, setEmail] = useState("");
     const [otp, setOtp] = useState("");
@@ -35,13 +38,17 @@ export default function Login({ navigation }) {
     const [otpSent, setOtpSent] = useState(false);
     const [otpLoading, setOtpLoading] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [cooldown, setCooldown] = useState(0);
+
+    // Synchronous refs prevent rapid duplicate requests
+    const inFlightRef = useRef(false);
+    const cooldownEndRef = useRef(0);
+    const timerRef = useRef(null);
 
     const isAdmin = loginType === "admin";
 
     // ==========================================================
     // CHECK ADMIN TOKEN
-    // If adminToken exists -> directly open adminhome
-    // If no adminToken -> stay on this login screen
     // ==========================================================
 
     useEffect(() => {
@@ -62,14 +69,71 @@ export default function Login({ navigation }) {
                     });
                 }
             } catch (error) {
-                console.error("ADMIN TOKEN CHECK ERROR:", error);
+                console.error(
+                    "ADMIN TOKEN CHECK ERROR:",
+                    error
+                );
             }
         };
 
         checkAdminToken();
     }, [navigation]);
 
+    // ==========================================================
+    // CLEAN UP TIMER
+    // ==========================================================
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+    }, []);
+
+    // ==========================================================
+    // START 13-SECOND COOLDOWN
+    // ==========================================================
+
+    const startCooldown = () => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+
+        cooldownEndRef.current =
+            Date.now() + OTP_COOLDOWN * 1000;
+
+        // Immediately update the button state
+        setCooldown(OTP_COOLDOWN);
+
+        timerRef.current = setInterval(() => {
+            const remaining = Math.max(
+                0,
+                Math.ceil(
+                    (cooldownEndRef.current - Date.now()) / 1000
+                )
+            );
+
+            setCooldown(remaining);
+
+            if (remaining <= 0) {
+                if (timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                }
+            }
+        }, 250);
+    };
+
+    // ==========================================================
+    // CHANGE LOGIN TYPE
+    // ==========================================================
+
     const changeLoginType = (type) => {
+        if (loading || otpLoading) return;
+
         setLoginType(type);
         setEmail("");
         setOtp("");
@@ -77,7 +141,19 @@ export default function Login({ navigation }) {
         setOtpSent(false);
     };
 
+    // ==========================================================
+    // SEND OTP
+    // ==========================================================
+
     const sendOTP = async () => {
+        // Block repeated requests even before React re-renders
+        if (
+            inFlightRef.current ||
+            Date.now() < cooldownEndRef.current
+        ) {
+            return;
+        }
+
         if (!email.trim()) {
             Alert.alert(
                 "Email required",
@@ -86,21 +162,32 @@ export default function Login({ navigation }) {
             return;
         }
 
+        // Lock before starting the network request
+        inFlightRef.current = true;
+        startCooldown();
         setOtpLoading(true);
 
         try {
-            const response = await fetch(`${BASE_URL}/users/mailauth`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    username: email.trim()
-                })
-            });
+            const response = await fetch(
+                `${BASE_URL}/users/mailauth`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        username: email.trim()
+                    })
+                }
+            );
 
             const data = await response.json();
-            console.log("OTP RESPONSE:", response.status, data);
+
+            console.log(
+                "OTP RESPONSE:",
+                response.status,
+                data
+            );
 
             if (!response.ok) {
                 Alert.alert(
@@ -115,7 +202,9 @@ export default function Login({ navigation }) {
 
             Alert.alert(
                 "OTP Sent",
-                `Please check your email for the ${isAdmin ? "admin " : ""}OTP.`
+                `Please check your email for the ${
+                    isAdmin ? "admin " : ""
+                }OTP.`
             );
         } catch (error) {
             console.error("OTP ERROR:", error);
@@ -125,11 +214,18 @@ export default function Login({ navigation }) {
                 "Unable to connect to the server."
             );
         } finally {
+            inFlightRef.current = false;
             setOtpLoading(false);
         }
     };
 
+    // ==========================================================
+    // LOGIN
+    // ==========================================================
+
     const handleLogin = async () => {
+        if (loading) return;
+
         if (!otpSent) {
             Alert.alert(
                 "OTP required",
@@ -139,30 +235,27 @@ export default function Login({ navigation }) {
         }
 
         if (!otp.trim()) {
-            Alert.alert("OTP required", "Please enter the OTP.");
+            Alert.alert(
+                "OTP required",
+                "Please enter the OTP."
+            );
             return;
         }
 
         if (!password) {
-            Alert.alert("Password required", "Please enter your password.");
+            Alert.alert(
+                "Password required",
+                "Please enter your password."
+            );
             return;
         }
 
         setLoading(true);
 
         try {
-            // ==========================================
-            // ADMIN LOGIN
-            // ==========================================
-
-            if (isAdmin) {
-                console.log("LOGIN REQUEST:", {
-                    username: email.trim(),
-                    otp: otp.trim(),
-                    type: "admin"
-                });
-
-                const response = await fetch(`${BASE_URL}/users/login`, {
+            const response = await fetch(
+                `${BASE_URL}/users/login`,
+                {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json"
@@ -171,27 +264,48 @@ export default function Login({ navigation }) {
                         username: email.trim(),
                         password: password,
                         otp: otp.trim(),
-                        type: "admin"
+                        type: isAdmin ? "admin" : "user"
                     })
-                });
-
-                const data = await response.json();
-                console.log("LOGIN RESPONSE:", response.status, data);
-
-                if (!response.ok) {
-                    Alert.alert(
-                        "Admin Login Failed",
-                        data.msg || "Invalid admin credentials."
-                    );
-                    return;
                 }
+            );
 
-                if (!data.token) {
-                    Alert.alert("Login Failed", "Admin token was not received.");
-                    return;
-                }
+            const data = await response.json();
 
-                await AsyncStorage.setItem("adminToken", data.token);
+            console.log(
+                "LOGIN RESPONSE:",
+                response.status,
+                data
+            );
+
+            if (!response.ok) {
+                Alert.alert(
+                    isAdmin
+                        ? "Admin Login Failed"
+                        : "Login failed",
+                    data.msg || "Invalid login details."
+                );
+                return;
+            }
+
+            if (!data.token) {
+                Alert.alert(
+                    "Login failed",
+                    isAdmin
+                        ? "Admin token was not received."
+                        : "Token was not received from server."
+                );
+                return;
+            }
+
+            // ==================================================
+            // ADMIN LOGIN
+            // ==================================================
+
+            if (isAdmin) {
+                await AsyncStorage.setItem(
+                    "adminToken",
+                    data.token
+                );
 
                 if (data.admin) {
                     await AsyncStorage.setItem(
@@ -208,57 +322,15 @@ export default function Login({ navigation }) {
                 return;
             }
 
-            // ==========================================
+            // ==================================================
             // STUDENT LOGIN
-            // ==========================================
-
-            console.log("LOGIN REQUEST:", {
-                username: email.trim(),
-                otp: otp.trim(),
-                type: "user"
-            });
-
-            const response = await fetch(`${BASE_URL}/users/login`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    username: email.trim(),
-                    password: password,
-                    otp: otp.trim(),
-                    type: "user"
-                })
-            });
-
-            const data = await response.json();
-            console.log("LOGIN RESPONSE:", response.status, data);
-
-            if (!response.ok) {
-                Alert.alert(
-                    "Login failed",
-                    data.msg || "Invalid login details."
-                );
-                return;
-            }
-
-            if (!data.token) {
-                Alert.alert(
-                    "Login failed",
-                    "Token was not received from server."
-                );
-                return;
-            }
+            // ==================================================
 
             const token = data.token;
 
-            // Save student token
             await AsyncStorage.setItem("token", token);
 
-            // ==========================================
-            // CHECK STUDENT REGISTRATION
-            // ==========================================
-
+            // Check student registration
             const registrationResponse = await fetch(
                 `${BASE_URL}/registration/getuserdata`,
                 {
@@ -272,9 +344,9 @@ export default function Login({ navigation }) {
                 }
             );
 
-            const registrationData = await registrationResponse.json();
+            const registrationData =
+                await registrationResponse.json();
 
-            // REGISTRATION EXISTS
             if (registrationResponse.ok) {
                 navigation.reset({
                     index: 0,
@@ -284,7 +356,6 @@ export default function Login({ navigation }) {
                 return;
             }
 
-            // REGISTRATION DOES NOT EXIST
             if (registrationResponse.status === 404) {
                 navigation.reset({
                     index: 0,
@@ -296,7 +367,8 @@ export default function Login({ navigation }) {
 
             Alert.alert(
                 "Error",
-                registrationData.msg || "Unable to check registration."
+                registrationData.msg ||
+                    "Unable to check registration."
             );
         } catch (error) {
             console.error("LOGIN ERROR:", error);
@@ -310,11 +382,19 @@ export default function Login({ navigation }) {
         }
     };
 
+    // Button disabled state
+    const otpButtonDisabled =
+        otpLoading || loading || cooldown > 0;
+
     return (
         <SafeAreaView style={styles.safeArea}>
             <KeyboardAvoidingView
                 style={styles.keyboardView}
-                behavior={Platform.OS === "ios" ? "padding" : undefined}
+                behavior={
+                    Platform.OS === "ios"
+                        ? "padding"
+                        : undefined
+                }
             >
                 <ScrollView
                     contentContainerStyle={styles.container}
@@ -330,7 +410,9 @@ export default function Login({ navigation }) {
                             </Text>
                         </View>
 
-                        <Text style={styles.brand}>DiwaliHaat</Text>
+                        <Text style={styles.brand}>
+                            DiwaliHaat
+                        </Text>
 
                         <Text style={styles.tagline}>
                             Celebrate. Connect. Belong.
@@ -340,7 +422,9 @@ export default function Login({ navigation }) {
                     {/* LOGIN CARD */}
 
                     <View style={styles.card}>
-                        <Text style={styles.title}>Welcome back</Text>
+                        <Text style={styles.title}>
+                            Welcome back
+                        </Text>
 
                         <Text style={styles.subtitle}>
                             {isAdmin
@@ -357,8 +441,10 @@ export default function Login({ navigation }) {
                                     loginType === "student" &&
                                         styles.activeTypeButton
                                 ]}
-                                onPress={() => changeLoginType("student")}
-                                disabled={loading}
+                                onPress={() =>
+                                    changeLoginType("student")
+                                }
+                                disabled={loading || otpLoading}
                             >
                                 <Text
                                     style={[
@@ -377,8 +463,10 @@ export default function Login({ navigation }) {
                                     loginType === "admin" &&
                                         styles.activeTypeButton
                                 ]}
-                                onPress={() => changeLoginType("admin")}
-                                disabled={loading}
+                                onPress={() =>
+                                    changeLoginType("admin")
+                                }
+                                disabled={loading || otpLoading}
                             >
                                 <Text
                                     style={[
@@ -395,7 +483,9 @@ export default function Login({ navigation }) {
                         {/* EMAIL */}
 
                         <Text style={styles.label}>
-                            {isAdmin ? "Admin Email" : "Email Address"}
+                            {isAdmin
+                                ? "Admin Email"
+                                : "Email Address"}
                         </Text>
 
                         <TextInput
@@ -415,7 +505,7 @@ export default function Login({ navigation }) {
                             keyboardType="email-address"
                             autoCapitalize="none"
                             autoCorrect={false}
-                            editable={!loading}
+                            editable={!loading && !otpLoading}
                         />
 
                         {/* OTP BUTTON */}
@@ -423,15 +513,18 @@ export default function Login({ navigation }) {
                         <TouchableOpacity
                             style={[
                                 styles.otpButton,
-                                otpLoading && styles.disabledButton
+                                otpButtonDisabled &&
+                                    styles.disabledButton
                             ]}
                             onPress={sendOTP}
-                            disabled={otpLoading || loading}
+                            disabled={otpButtonDisabled}
                             activeOpacity={0.8}
                         >
                             <Text style={styles.otpButtonText}>
                                 {otpLoading
                                     ? "Sending OTP..."
+                                    : cooldown > 0
+                                    ? `Wait ${cooldown}s`
                                     : otpSent
                                     ? "Resend OTP"
                                     : "Send OTP"}
@@ -450,7 +543,9 @@ export default function Login({ navigation }) {
 
                         {/* OTP */}
 
-                        <Text style={styles.label}>OTP</Text>
+                        <Text style={styles.label}>
+                            OTP
+                        </Text>
 
                         <TextInput
                             style={styles.input}
@@ -465,7 +560,9 @@ export default function Login({ navigation }) {
 
                         {/* PASSWORD */}
 
-                        <Text style={styles.label}>Password</Text>
+                        <Text style={styles.label}>
+                            Password
+                        </Text>
 
                         <TextInput
                             style={styles.input}
@@ -483,7 +580,7 @@ export default function Login({ navigation }) {
                             editable={!loading}
                         />
 
-                        {/* LOGIN */}
+                        {/* LOGIN BUTTON */}
 
                         <TouchableOpacity
                             style={[
@@ -523,6 +620,8 @@ export default function Login({ navigation }) {
                             </View>
                         )}
                     </View>
+
+                    {/* FOOTER */}
 
                     <Text style={styles.footer}>
                         {isAdmin
@@ -587,7 +686,6 @@ const styles = StyleSheet.create({
         backgroundColor: "#FFFFFF",
         borderRadius: 24,
         padding: 24,
-
         shadowColor: "#000",
         shadowOffset: {
             width: 0,
@@ -595,7 +693,6 @@ const styles = StyleSheet.create({
         },
         shadowOpacity: 0.08,
         shadowRadius: 20,
-
         elevation: 6
     },
 
@@ -706,7 +803,7 @@ const styles = StyleSheet.create({
     },
 
     disabledButton: {
-        opacity: 0.6
+        opacity: 0.45
     },
 
     signupRow: {
