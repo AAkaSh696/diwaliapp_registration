@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-// import { BASE_URL } from "@env";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
@@ -12,9 +11,20 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
-    Alert
+    Alert as RNAlert
 } from "react-native";
-const BASE_URL="http://13.53.235.116:5001";
+
+// Alert.alert does nothing on web, so use window.alert there
+const Alert = {
+    alert: (title, msg) =>
+        Platform.OS === "web"
+            ? window.alert(`${title}\n\n${msg || ""}`)
+            : RNAlert.alert(title, msg)
+};
+
+// One backend (AWS) for web, Android and iOS
+const BASE_URL = "http://10.162.135.224:5001";
+
 export default function Login({ navigation }) {
     const [loginType, setLoginType] = useState("student");
 
@@ -48,18 +58,11 @@ export default function Login({ navigation }) {
                 if (adminToken) {
                     navigation.reset({
                         index: 0,
-                        routes: [
-                            {
-                                name: "adminhome"
-                            }
-                        ]
+                        routes: [{ name: "adminhome" }]
                     });
                 }
             } catch (error) {
-                console.error(
-                    "ADMIN TOKEN CHECK ERROR:",
-                    error
-                );
+                console.error("ADMIN TOKEN CHECK ERROR:", error);
             }
         };
 
@@ -86,11 +89,7 @@ export default function Login({ navigation }) {
         setOtpLoading(true);
 
         try {
-            const url = isAdmin
-                ? `${BASE_URL}/users/mailauth`
-                : `${BASE_URL}/users/mailauth`;
-
-            const response = await fetch(url, {
+            const response = await fetch(`${BASE_URL}/users/mailauth`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json"
@@ -101,6 +100,7 @@ export default function Login({ navigation }) {
             });
 
             const data = await response.json();
+            console.log("OTP RESPONSE:", response.status, data);
 
             if (!response.ok) {
                 Alert.alert(
@@ -117,7 +117,6 @@ export default function Login({ navigation }) {
                 "OTP Sent",
                 `Please check your email for the ${isAdmin ? "admin " : ""}OTP.`
             );
-
         } catch (error) {
             console.error("OTP ERROR:", error);
 
@@ -140,18 +139,12 @@ export default function Login({ navigation }) {
         }
 
         if (!otp.trim()) {
-            Alert.alert(
-                "OTP required",
-                "Please enter the OTP."
-            );
+            Alert.alert("OTP required", "Please enter the OTP.");
             return;
         }
 
         if (!password) {
-            Alert.alert(
-                "Password required",
-                "Please enter your password."
-            );
+            Alert.alert("Password required", "Please enter your password.");
             return;
         }
 
@@ -163,23 +156,27 @@ export default function Login({ navigation }) {
             // ==========================================
 
             if (isAdmin) {
-                const response = await fetch(
-                    `${BASE_URL}/users/login`,
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            username: email.trim(),
-                            password: password,
-                            otp: otp.trim(),
-                            type: "admin"
-                        })
-                    }
-                );
+                console.log("LOGIN REQUEST:", {
+                    username: email.trim(),
+                    otp: otp.trim(),
+                    type: "admin"
+                });
+
+                const response = await fetch(`${BASE_URL}/users/login`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        username: email.trim(),
+                        password: password,
+                        otp: otp.trim(),
+                        type: "admin"
+                    })
+                });
 
                 const data = await response.json();
+                console.log("LOGIN RESPONSE:", response.status, data);
 
                 if (!response.ok) {
                     Alert.alert(
@@ -190,17 +187,11 @@ export default function Login({ navigation }) {
                 }
 
                 if (!data.token) {
-                    Alert.alert(
-                        "Login Failed",
-                        "Admin token was not received."
-                    );
+                    Alert.alert("Login Failed", "Admin token was not received.");
                     return;
                 }
 
-                await AsyncStorage.setItem(
-                    "adminToken",
-                    data.token
-                );
+                await AsyncStorage.setItem("adminToken", data.token);
 
                 if (data.admin) {
                     await AsyncStorage.setItem(
@@ -211,11 +202,7 @@ export default function Login({ navigation }) {
 
                 navigation.reset({
                     index: 0,
-                    routes: [
-                        {
-                            name: "adminhome"
-                        }
-                    ]
+                    routes: [{ name: "adminhome" }]
                 });
 
                 return;
@@ -225,23 +212,27 @@ export default function Login({ navigation }) {
             // STUDENT LOGIN
             // ==========================================
 
-            const response = await fetch(
-                `${BASE_URL}/users/login`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        username: email.trim(),
-                        password: password,
-                        otp: otp.trim(),
-                        type: "user"
-                    })
-                }
-            );
+            console.log("LOGIN REQUEST:", {
+                username: email.trim(),
+                otp: otp.trim(),
+                type: "user"
+            });
+
+            const response = await fetch(`${BASE_URL}/users/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    username: email.trim(),
+                    password: password,
+                    otp: otp.trim(),
+                    type: "user"
+                })
+            });
 
             const data = await response.json();
+            console.log("LOGIN RESPONSE:", response.status, data);
 
             if (!response.ok) {
                 Alert.alert(
@@ -262,63 +253,42 @@ export default function Login({ navigation }) {
             const token = data.token;
 
             // Save student token
-            await AsyncStorage.setItem(
-                "token",
-                token
-            );
+            await AsyncStorage.setItem("token", token);
 
             // ==========================================
             // CHECK STUDENT REGISTRATION
             // ==========================================
 
-            const registrationResponse =
-                await fetch(
-                    `${BASE_URL}/registration/getuserdata`,
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            token: token
-                        })
-                    }
-                );
+            const registrationResponse = await fetch(
+                `${BASE_URL}/registration/getuserdata`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        token: token
+                    })
+                }
+            );
 
-            const registrationData =
-                await registrationResponse.json();
+            const registrationData = await registrationResponse.json();
 
-            // ==========================================
             // REGISTRATION EXISTS
-            // ==========================================
-
             if (registrationResponse.ok) {
-
                 navigation.reset({
                     index: 0,
-                    routes: [
-                        {
-                            name: "Home"
-                        }
-                    ]
+                    routes: [{ name: "Home" }]
                 });
 
                 return;
             }
 
-            // ==========================================
             // REGISTRATION DOES NOT EXIST
-            // ==========================================
-
             if (registrationResponse.status === 404) {
-
                 navigation.reset({
                     index: 0,
-                    routes: [
-                        {
-                            name: "registration"
-                        }
-                    ]
+                    routes: [{ name: "registration" }]
                 });
 
                 return;
@@ -326,21 +296,15 @@ export default function Login({ navigation }) {
 
             Alert.alert(
                 "Error",
-                registrationData.msg ||
-                    "Unable to check registration."
+                registrationData.msg || "Unable to check registration."
             );
-
         } catch (error) {
-            console.error(
-                "LOGIN ERROR:",
-                error
-            );
+            console.error("LOGIN ERROR:", error);
 
             Alert.alert(
                 "Connection Error",
                 "Unable to connect to the server."
             );
-
         } finally {
             setLoading(false);
         }
@@ -350,45 +314,33 @@ export default function Login({ navigation }) {
         <SafeAreaView style={styles.safeArea}>
             <KeyboardAvoidingView
                 style={styles.keyboardView}
-                behavior={
-                    Platform.OS === "ios"
-                        ? "padding"
-                        : undefined
-                }
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
             >
                 <ScrollView
                     contentContainerStyle={styles.container}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                 >
-
                     {/* HEADER */}
 
                     <View style={styles.header}>
-
                         <View style={styles.logoCircle}>
                             <Text style={styles.logo}>
                                 {isAdmin ? "🔐" : "🪔"}
                             </Text>
                         </View>
 
-                        <Text style={styles.brand}>
-                            DiwaliHaat
-                        </Text>
+                        <Text style={styles.brand}>DiwaliHaat</Text>
 
                         <Text style={styles.tagline}>
                             Celebrate. Connect. Belong.
                         </Text>
-
                     </View>
 
                     {/* LOGIN CARD */}
 
                     <View style={styles.card}>
-
-                        <Text style={styles.title}>
-                            Welcome back
-                        </Text>
+                        <Text style={styles.title}>Welcome back</Text>
 
                         <Text style={styles.subtitle}>
                             {isAdmin
@@ -399,16 +351,13 @@ export default function Login({ navigation }) {
                         {/* LOGIN TYPE */}
 
                         <View style={styles.loginTypeContainer}>
-
                             <TouchableOpacity
                                 style={[
                                     styles.typeButton,
                                     loginType === "student" &&
                                         styles.activeTypeButton
                                 ]}
-                                onPress={() =>
-                                    changeLoginType("student")
-                                }
+                                onPress={() => changeLoginType("student")}
                                 disabled={loading}
                             >
                                 <Text
@@ -428,9 +377,7 @@ export default function Login({ navigation }) {
                                     loginType === "admin" &&
                                         styles.activeTypeButton
                                 ]}
-                                onPress={() =>
-                                    changeLoginType("admin")
-                                }
+                                onPress={() => changeLoginType("admin")}
                                 disabled={loading}
                             >
                                 <Text
@@ -443,15 +390,12 @@ export default function Login({ navigation }) {
                                     🔐 Admin
                                 </Text>
                             </TouchableOpacity>
-
                         </View>
 
                         {/* EMAIL */}
 
                         <Text style={styles.label}>
-                            {isAdmin
-                                ? "Admin Email"
-                                : "Email Address"}
+                            {isAdmin ? "Admin Email" : "Email Address"}
                         </Text>
 
                         <TextInput
@@ -479,13 +423,10 @@ export default function Login({ navigation }) {
                         <TouchableOpacity
                             style={[
                                 styles.otpButton,
-                                otpLoading &&
-                                    styles.disabledButton
+                                otpLoading && styles.disabledButton
                             ]}
                             onPress={sendOTP}
-                            disabled={
-                                otpLoading || loading
-                            }
+                            disabled={otpLoading || loading}
                             activeOpacity={0.8}
                         >
                             <Text style={styles.otpButtonText}>
@@ -509,9 +450,7 @@ export default function Login({ navigation }) {
 
                         {/* OTP */}
 
-                        <Text style={styles.label}>
-                            OTP
-                        </Text>
+                        <Text style={styles.label}>OTP</Text>
 
                         <TextInput
                             style={styles.input}
@@ -526,9 +465,7 @@ export default function Login({ navigation }) {
 
                         {/* PASSWORD */}
 
-                        <Text style={styles.label}>
-                            Password
-                        </Text>
+                        <Text style={styles.label}>Password</Text>
 
                         <TextInput
                             style={styles.input}
@@ -551,8 +488,7 @@ export default function Login({ navigation }) {
                         <TouchableOpacity
                             style={[
                                 styles.loginButton,
-                                loading &&
-                                    styles.disabledButton
+                                loading && styles.disabledButton
                             ]}
                             onPress={handleLogin}
                             disabled={loading}
@@ -571,7 +507,6 @@ export default function Login({ navigation }) {
 
                         {!isAdmin && (
                             <View style={styles.signupRow}>
-
                                 <Text style={styles.signupText}>
                                     Don't have an account?
                                 </Text>
@@ -585,10 +520,8 @@ export default function Login({ navigation }) {
                                         {" "}Signup
                                     </Text>
                                 </TouchableOpacity>
-
                             </View>
                         )}
-
                     </View>
 
                     <Text style={styles.footer}>
@@ -596,7 +529,6 @@ export default function Login({ navigation }) {
                             ? "🔒 Authorized administrators only"
                             : "Your celebration starts here ✨"}
                     </Text>
-
                 </ScrollView>
             </KeyboardAvoidingView>
         </SafeAreaView>

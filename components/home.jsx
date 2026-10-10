@@ -28,7 +28,7 @@ import {
 
 import action from "../redux/action";
 
-const BASE_URL="http://13.53.235.116:5001";
+const BASE_URL = "http://10.162.135.224:5001";
 
 export default function Home({ navigation }) {
 

@@ -4,7 +4,7 @@ import Welcome from "./welcome.jsx";
 import Signup from "./signup.jsx"
 import Registration from "./registration.jsx";
 import Login from "./loginpage.jsx"
-import Profile from "./profile.jsx"
+import Profile from "./profile"
 import Event from "./events.jsx"
 import AdminHome from "./adminhome.jsx"
 import VerifyStudent from "./verifystudentpage.jsx"

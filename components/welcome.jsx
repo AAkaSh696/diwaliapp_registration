@@ -14,7 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useDispatch } from "react-redux";
 import action from "../redux/action";
 
-const BASE_URL="http://13.53.235.116:5001";
+const BASE_URL = "http://10.162.135.224:5001";
 const welcomeImage = require("../assets/wlcm.jpg");
 
 export default function Welcome({ navigation }) {
@@ -46,7 +46,7 @@ export default function Welcome({ navigation }) {
                 const data = await response.json();
 
                 if (response.status === 404) {
-                    setScreen("StudentRegistration");
+                    setScreen("registration");
                     return;
                 }
 

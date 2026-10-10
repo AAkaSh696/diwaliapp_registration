@@ -1,7 +1,5 @@
 import React, { useState } from "react";
 // import {BASE_URL} from "@env"
-
-console.log("BASE_URL:", BASE_URL);
 import {
     StyleSheet,
     Text,
@@ -14,7 +12,7 @@ import {
     ScrollView,
     Alert
 } from "react-native";
- const BASE_URL="http://13.53.235.116:5001";
+const BASE_URL = "http://10.162.135.224:5001";
 export default function Signup({ navigation }) {
 
     const [email, setEmail] = useState("");

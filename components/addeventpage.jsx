@@ -16,7 +16,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // import { BASE_URL } from "@env";
 
-  const BASE_URL="http://13.53.235.116:5001";
+  const BASE_URL = "http://10.162.135.224:5001";
 export default function AddEvent({ navigation }) {
     const [title, setTitle] = useState("");
     const [highlight, setHighlight] = useState("");

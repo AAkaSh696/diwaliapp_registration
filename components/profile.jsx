@@ -7,10 +7,64 @@ import {
     SafeAreaView,
     Image,
     ScrollView,
+    Platform,
 } from "react-native";
 
-import QRCode from "react-native-qrcode-svg";
+import QRCodeNative from "react-native-qrcode-svg";
+import QRCodeWeb from "react-qr-code";
 import { useSelector } from "react-redux";
+
+
+/* ============================================================
+   QR CODE (works on Android + Web)
+============================================================ */
+
+function QR({ value, size = 220 }) {
+
+    if (!value) return null;
+
+    if (Platform.OS === "web") {
+
+        return (
+
+            <View
+                style={{
+                    width: size,
+                    height: size,
+                    backgroundColor: "#FFFFFF",
+                }}
+            >
+
+                <QRCodeWeb
+                    value={value}
+                    size={size}
+                    bgColor="#FFFFFF"
+                    fgColor="#000000"
+                    level="L"
+                    style={{
+                        width: size,
+                        height: size,
+                    }}
+                />
+
+            </View>
+
+        );
+
+    }
+
+    return (
+
+        <QRCodeNative
+            value={value}
+            size={size}
+            backgroundColor="white"
+            ecl="L"
+        />
+
+    );
+
+}
 
 
 export default function Profile() {
@@ -38,13 +92,20 @@ export default function Profile() {
      * QR DATA
      * =========================
      *
-     * Convert complete user object
-     * into JSON for QR code.
+     * Convert user object into JSON for QR code.
+     * The profile photo URL is left out because
+     * long URLs make the QR too big to render.
      */
 
-    const qrValue = user
-        ? JSON.stringify(user)
-        : "";
+    let qrValue = "";
+
+    if (user) {
+
+        const { url, ...qrData } = user;
+
+        qrValue = JSON.stringify(qrData);
+
+    }
 
 
     /*
@@ -343,14 +404,9 @@ export default function Profile() {
                         }
                     >
 
-                        <QRCode
-
+                        <QR
                             value={qrValue}
-
                             size={220}
-
-                            backgroundColor="white"
-
                         />
 
                     </View>
