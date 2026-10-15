@@ -14,7 +14,7 @@ import {
     Alert
 } from "react-native";
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 // Cooldown in seconds
 const OTP_COOLDOWN_SECONDS = 13;

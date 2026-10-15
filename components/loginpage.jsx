@@ -22,8 +22,7 @@ const Alert = {
             : RNAlert.alert(title, msg)
 };
 
-// Backend for web, Android and iOS
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 // OTP cooldown in seconds
 const OTP_COOLDOWN = 13;

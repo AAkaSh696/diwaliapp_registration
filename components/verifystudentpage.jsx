@@ -22,7 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // SAME BACKEND FOR ANDROID AND WEB
 // =====================================================
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 export default function VerifyStudents({ navigation }) {
   const [students, setStudents] = useState([]);

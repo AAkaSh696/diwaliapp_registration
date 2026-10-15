@@ -1,7 +1,8 @@
 
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import {
+    ActivityIndicator,
     StyleSheet,
     Text,
     View,
@@ -11,9 +12,13 @@ import {
     Platform,
 } from "react-native";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import QRCodeNative from "react-native-qrcode-svg";
 import QRCodeWeb from "react-qr-code";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
+import action from "../redux/action";
+
+const BASE_URL = "";
 
 /* ============================================================
    QR CODE — ANDROID + WEB
@@ -55,30 +60,111 @@ function QR({ value, size = 220 }) {
 ============================================================ */
 
 export default function Profile() {
+    const dispatch = useDispatch();
+
     const user = useSelector((state) => state.user);
+    const events = useSelector((state) => state.events || []);
+
+    const [loading, setLoading] = useState(!user);
+    const [fetchError, setFetchError] = useState("");
 
     /*
     |--------------------------------------------------------------------------
-    | QR DATA
+    | Fetch student data after refresh
     |--------------------------------------------------------------------------
-    | Include both image URLs explicitly.
-    | url        = profile photo
-    | urlAadhar  = Aadhaar image
     */
 
-    const qrData = user
-        ? {
-              ...user,
-              url: user.url || "",
-              urlAadhar: user.urlAadhar || "",
-          }
-        : null;
+    const fetchUserData = useCallback(async () => {
+        try {
+            setLoading(true);
+            setFetchError("");
 
-    const qrValue = qrData ? JSON.stringify(qrData) : "";
+            const token = await AsyncStorage.getItem("token");
+
+            if (!token) {
+                setFetchError("Please log in again to view your profile.");
+                return;
+            }
+
+            const response = await fetch(
+                `${BASE_URL}/registration/getuserdata`,
+                {
+                    method: "POST",
+                    headers: {
+                        Accept: "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ token }),
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    result?.msg ||
+                    result?.message ||
+                    `Request failed with status ${response.status}`
+                );
+            }
+
+            if (!result?.data) {
+                throw new Error(
+                    result?.msg ||
+                    result?.message ||
+                    "Student details could not be found."
+                );
+            }
+
+            dispatch(
+                action({
+                    type: "updatedata",
+                    data: {
+                        user: result.data,
+                        events,
+                    },
+                })
+            );
+        } catch (error) {
+            console.error("PROFILE FETCH ERROR:", error);
+            setFetchError(
+                error.message || "Unable to load student information."
+            );
+        } finally {
+            setLoading(false);
+        }
+    }, [dispatch, events]);
+
+    useEffect(() => {
+        if (!user) {
+            fetchUserData();
+        } else {
+            setLoading(false);
+        }
+    }, [user, fetchUserData]);
 
     /*
     |--------------------------------------------------------------------------
-    | EMPTY STATE
+    | Loading state
+    |--------------------------------------------------------------------------
+    */
+
+    if (loading) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.emptyContainer}>
+                    <ActivityIndicator size="large" color="#B64216" />
+                    <Text style={styles.emptyText}>
+                        Loading your profile...
+                    </Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Empty state
     |--------------------------------------------------------------------------
     */
 
@@ -91,12 +177,34 @@ export default function Profile() {
                     </Text>
 
                     <Text style={styles.emptyText}>
-                        Student information is not available.
+                        {fetchError ||
+                            "Student information is not available."}
+                    </Text>
+
+                    <Text
+                        style={styles.retryButton}
+                        onPress={fetchUserData}
+                    >
+                        Tap here to retry
                     </Text>
                 </View>
             </SafeAreaView>
         );
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | QR data
+    |--------------------------------------------------------------------------
+    */
+
+    const qrData = {
+        ...user,
+        url: user.url || "",
+        urlAadhar: user.urlAadhar || "",
+    };
+
+    const qrValue = JSON.stringify(qrData);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -187,26 +295,13 @@ export default function Profile() {
                         Student Information
                     </Text>
 
-                    <InfoRow
-                        label="Roll Number"
-                        value={user.RollNO}
-                    />
-
+                    <InfoRow label="Roll Number" value={user.RollNO} />
                     <InfoRow
                         label="Branch"
                         value={user.branch?.toUpperCase()}
                     />
-
-                    <InfoRow
-                        label="Batch"
-                        value={user.batch}
-                    />
-
-                    <InfoRow
-                        label="Mobile"
-                        value={user.MobileNo}
-                    />
-
+                    <InfoRow label="Batch" value={user.batch} />
+                    <InfoRow label="Mobile" value={user.MobileNo} />
                     <InfoRow
                         label="Verification"
                         value={user.verified ? "Verified" : "Pending"}
@@ -256,9 +351,7 @@ export default function Profile() {
                 {/* QR CODE */}
 
                 <View style={styles.qrCard}>
-                    <Text style={styles.sectionTitle}>
-                        Student QR
-                    </Text>
+                    <Text style={styles.sectionTitle}>Student QR</Text>
 
                     <Text style={styles.qrDescription}>
                         Scan this QR code to access the student's
@@ -282,9 +375,7 @@ export default function Profile() {
                 {/* QR DATA SIZE */}
 
                 <View style={styles.dataCard}>
-                    <Text style={styles.dataTitle}>
-                        QR Data
-                    </Text>
+                    <Text style={styles.dataTitle}>QR Data</Text>
 
                     <Text style={styles.dataText}>
                         {qrValue.length} characters encoded
@@ -602,5 +693,13 @@ const styles = StyleSheet.create({
         fontSize: 15,
         color: "#6B7280",
         textAlign: "center",
+        marginTop: 10,
+    },
+
+    retryButton: {
+        marginTop: 18,
+        fontSize: 15,
+        fontWeight: "700",
+        color: "#B64216",
     },
 });

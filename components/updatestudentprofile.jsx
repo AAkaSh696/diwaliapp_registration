@@ -20,7 +20,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchImageLibrary } from "react-native-image-picker";
 
 // Change this to your backend's reachable IP address.
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 /*
 |--------------------------------------------------------------------------

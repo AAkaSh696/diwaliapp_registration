@@ -19,7 +19,7 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import action from '../redux/action';
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 export default function Events() {
    
     const dispatch = useDispatch();

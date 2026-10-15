@@ -3,7 +3,7 @@ import { Html5Qrcode } from "html5-qrcode";
 
 const scannerId = "diwalih-aat-qr-reader";
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 const VERIFY_URL = `${BASE_URL}/admin/status`;
 const TOKEN_KEY = "adminToken";
 

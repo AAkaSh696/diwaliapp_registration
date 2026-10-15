@@ -19,7 +19,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // import { BASE_URL } from "@env";
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 export default function AdminHome({ navigation }) {
 
     // ==========================================

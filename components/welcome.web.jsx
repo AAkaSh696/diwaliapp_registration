@@ -14,7 +14,7 @@ import { useDispatch } from "react-redux";
 import action from "../redux/action";
 import welcomeImage from "../assets/wlcm.jpg";
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 export default function Welcome({ navigation }) {
     const [screen, setScreen] = useState(null);

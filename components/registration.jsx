@@ -16,9 +16,7 @@ import {
 
 import { launchImageLibrary } from "react-native-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-// One backend (AWS) for web, Android and iOS
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 
 /* =====================================================
    WEB-SAFE ALERT

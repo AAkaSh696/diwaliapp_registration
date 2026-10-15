@@ -26,7 +26,7 @@ import {
 
 import { useBarcodeScannerOutput } from "react-native-vision-camera-barcode-scanner";
 
-const BASE_URL = "http://10.162.135.224:5001";
+const BASE_URL = "";
 const VERIFY_URL = `${BASE_URL}/admin/status`;
 const TOKEN_KEY = "adminToken";
 
